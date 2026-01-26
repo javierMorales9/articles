@@ -46,3 +46,4 @@ Run from `ref/` unless noted:
 - Use the project launcher to ensure the correct model is selected for each new session.
 - Start a session from this repo with: `./codex-local` (sets GPT-5.2 with medium reasoning).
 - Article writing: use the `long-posts-writer` skill (template lives in its `references/ARTICLE_PROMPT.md`).
+- LinkedIn writing: use the `linkedin-posts-writer` skill (template lives in its `references/LINKEDIN_PROMPT.md`).
