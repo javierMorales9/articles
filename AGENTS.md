@@ -47,3 +47,14 @@ Run from `ref/` unless noted:
 - Start a session from this repo with: `./codex-local` (sets GPT-5.2 with medium reasoning).
 - Article writing: use the `long-posts-writer` skill (template lives in its `references/ARTICLE_PROMPT.md`).
 - LinkedIn writing: use the `linkedin-posts-writer` skill (template lives in its `references/LINKEDIN_PROMPT.md`).
+- For any article in this repo, outline the post using `strategy.md` (open loops pattern) before drafting.
+- Articles in this repo default to first-person voice unless explicitly requested otherwise.
+- Prefer readability over brevity when it helps understanding; teach concepts and avoid assuming reader context.
+- When explaining concurrency, use a step-by-step interleaving ("dance") with a concrete example and include both pseudocode and equivalent SQL.
+
+## Article Series Workflow (fixes_to_manuscritten_payment_system)
+- Maintain `fixes_to_manuscritten_payment_system/context.md` describing the series and planned articles.
+- Create one article per process step.
+- Always propose and discuss an outline before drafting full articles; do not write the article until explicitly asked.
+- The first article is an introduction covering: what Manuscritten is, how the issue was discovered, and how the API worked before the fixes.
+- For outlines and post structure, follow `strategy.md` (open loops pattern).
