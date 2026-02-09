@@ -3,13 +3,14 @@
 ## Purpose (This Repo)
 This repository is the home for **blog articles**. Each article (or series) lives in its own folder.
 
-Articles usually reference real code changes from other projects. To make that workflow easy, we typically symlink the relevant product/code repo (or worktree) into the article folder so Codex can read diffs and review code while helping write the post.
+Articles usually reference real code changes from other projects. To make that workflow easy, we keep a **snapshot** of the relevant product/code repo inside the article folder (usually under `ref/`) so Codex can read diffs and review code while helping write the post.
 
 ## Folder Structure
 Follow the structure defined in `README.md`:
 - One folder per article or series (e.g. `my-post/`, `payments-series/`).
-- Each article folder usually contains a symlink named `ref/` pointing to the repo/worktree that contains the changes being written about.
+- Each article folder usually contains a `ref/` folder containing a **snapshot** of the repo/worktree that contains the changes being written about (typically a git worktree pinned to a specific commit).
 - For a series, you can share the same `ref/` across multiple posts under the series folder.
+- Optionally, an article/series folder can contain `commits.md` describing the commit range to review (FIRST/LAST).
 
 Example series layout:
 ```
@@ -24,7 +25,7 @@ payment-series/
 ```
 
 ## Linking A Repo/Worktree
-We use the **article-linker** utility to create the symlink. It will prompt you (via `fzf`) to choose an article folder under `~/personal/articles/`, then create/update `ref/` inside that folder.
+We use the **article-linker** utility to create/update `ref/`. The goal is that `ref/` is a **stable snapshot** for the article (so ongoing work on the original repo doesn’t change what the article is based on).
 
 Expected location:
 ```
@@ -37,9 +38,9 @@ article-linker /path/to/repo
 # (then pick an article folder in fzf, e.g. `my-post`)
 ```
 
-Result:
-```
-/home/javi/personal/articles/my-post/ref -> /path/to/repo
+If you’re creating the snapshot manually, the recommended approach is a detached worktree pinned to the article’s LAST commit:
+```bash
+git -C /path/to/repo worktree add --detach /home/javi/personal/articles/my-post/ref <LAST_SHA>
 ```
 
 ## Using Codex (Recommended)
@@ -47,66 +48,7 @@ Result:
 - Then point Codex at the relevant article folder (or mention the linked `ref/` repo) and ask it to review changes, diffs, and draft the article.
 
 ## Manuscritten Articles
-If the article is about Manuscritten, also read `manuscritten.md` in this repo (sometimes symlinked into an article folder). It contains the current “how to navigate the codebase” notes for the `ref/` symlinked repo.
-
-For now, we keep those notes mirrored here as well (keep `manuscritten.md` as the canonical source).
-
-### Manuscritten — brief context
-Manuscritten is a platform for creating and sending handwritten letters as part of acquisition and retention campaigns. Letters are configured in a web app (text, typography, margins, signature, QR, design), converted into print instructions (primarily SVG), and executed by writing robots.
-
-Sending modes:
-- One-off campaigns (CSV upload).
-- Automated campaigns via integrations (Zapier/HubSpot/API).
-- Single letters for ad-hoc use.
-
-Core components:
-- Next.js app (UI + API) for campaigns, letters, designs, billing, and integrations.
-- Background worker for validation and batch processing.
-- Robot controller service that receives print jobs and drives local hardware.
-- Integrations (HubSpot, Zapier, API) that feed automated campaigns.
-
-Credits are the primary billing unit and are charged or owed at card creation and campaign activation, depending on the campaign type. Correctness depends on transactional credit mutations under concurrency.
-
-### Manuscritten project structure (inside `ref/`)
-- `ref/apps/web/`: Next.js 16 web app (UI + API).
-- `ref/apps/worker/`: Background job processor for validation and post-processing.
-- `ref/packages/`: Shared libraries (`db`, `domain`, `env`, `logger`) used across apps.
-- `ref/db/`: Local dev seeding utilities and `fillDb.ts`.
-- `ref/docs/` and `ref/infra/`: Documentation and infrastructure assets.
-- `ref/hubspot/`, `ref/zapier_integration/`: External integrations; treat as separate deployables.
-
-### Manuscritten build/test/dev commands (run from `ref/`)
-- `npm install`: Install workspace dependencies.
-- `npm run dev:web`: Start the web app with dotenvx.
-- `npm run dev:worker`: Start the worker using `.env.worker`.
-- `npm run build:web` / `npm run build:worker`: Build web/worker targets.
-- `npm run start:web` / `npm run start:worker`: Run production builds.
-- `npm run lint:web`: Lint the web app.
-- `npm run typecheck`: Type-check all workspaces.
-- `npm run db:generate` / `npm run db:apply`: Drizzle migrations for the DB package.
-
-### Manuscritten conventions
-- Language: TypeScript (ESM), Node `20.x`.
-- Indentation: follow existing files (2 spaces in JSON; 2 in TS/JS).
-- Prefer domain-driven naming in `ref/packages/domain/` (e.g., `Company.ts`, `Campaign.ts`).
-- Linting: ESLint (`ref/apps/web/eslint.config.mjs`).
-- Formatting: Prettier (run locally if needed).
-
-### Manuscritten testing
-- Framework: Jest (`ref/apps/web/jest.config.ts`).
-- Locations: `ref/apps/web/src/tests/unit/` and `ref/apps/web/src/tests/integration/`.
-- Naming: `*.test.ts` or `*.test.tsx`.
-- Run tests: `npm run test:web` or `npm run -w apps/web test:client|test:server-unit|test:server-int`.
-- Integration tests use testcontainers and require Docker.
-
-### Manuscritten PR hygiene
-- Commits: short, imperative summaries (e.g., “Add validation”, “Fix build”).
-- PRs: include intent summary, linked issue/task, and screenshots for UI changes.
-- Call out env var additions and DB migrations explicitly.
-
-### Manuscritten config/security
-- Env validation lives in `ref/packages/env/`; add new variables there first.
-- `.env` and `.env.worker` are loaded via dotenvx; avoid committing secrets.
+If the article is about Manuscritten, read `manuscritten.md` in this repo. It’s the canonical “how to navigate the codebase” reference for the `ref/` snapshot (project structure, commands, conventions, testing).
 
 ## Prompt Workflow (Editorial Pipeline)
 Editorial prompts live in `./prompts/`. Execute the workflow by **opening and following the instructions in the corresponding prompt file** (do not improvise your own version of the prompt).

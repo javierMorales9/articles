@@ -1,0 +1,14 @@
+# Snapshot repos/worktrees live under each article folder.
+# They are large and should not be committed.
+**/ref/
+
+# Node artifacts (in case refs are opened/installed locally)
+**/node_modules/
+**/.next/
+**/dist/
+**/.turbo/
+**/.cache/
+
+# Local editor/OS
+.DS_Store
+Thumbs.db

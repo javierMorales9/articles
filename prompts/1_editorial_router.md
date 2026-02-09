@@ -43,7 +43,7 @@ The agent may receive:
 
 * A high-level description of the work (human input)
 * A branch name or commit range
-* Read-only access to the repository via symlink
+* Read-only access to a snapshot repo in the article folder (typically under `ref/`)
 
 All inputs are optional, but confidence must be lowered if inputs are missing.
 
