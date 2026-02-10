@@ -1,23 +1,28 @@
-# Prompt 4 — Structure Selector
+# Prompt 4 — Article Shaper (Scope + Title/Hook + CTA + Structure)
 
 ## Purpose
 
-This prompt explores **multiple possible article structures**, helps the user choose **one**, and then writes **that single chosen structure** to `structure.md`.
+This prompt shapes **one specific article** (single post or one post in a series) by:
 
-Comparison and decision happen first. Persistence to disk happens only **after a structure is selected**.
+1) Selecting the article’s **rough content scope** (what is in / out).  
+2) Crafting the **title + hook** (high impact, click-worthy, aligned with the article’s insight).  
+3) Defining a clear **CTA**.  
+4) Comparing **3–5 distinct narrative structures**, helping the user pick **exactly one**, then writing the chosen plan to `structure.md`.
 
-The structure written to `structure.md` is **high-level and lightweight**. It will be expanded later by another prompt.
+Persistence to disk happens only **after decisions are made**.
+
+The `structure.md` produced here is **lightweight** and will be expanded by Prompt 5 into an execution-ready “what to say” plan.
 
 ---
 
 ## What this prompt is NOT allowed to do
 
 * ❌ Write article prose
-* ❌ Explain implementation details
-* ❌ Turn the article into a generic how-to
+* ❌ Explain implementation details (beyond naming flows/files at a high level)
+* ❌ Turn the article into a generic, context-free how-to
 * ❌ Repeat the same section list across options
 
-This prompt must **explain structures**, not duplicate templates.
+This prompt must make **high-level editorial decisions** (scope, hook, CTA, structure) without writing the article.
 
 ---
 
@@ -36,41 +41,63 @@ This prompt must **explain structures**, not duplicate templates.
 The agent must take into account:
 
 * The final decision and insights from **Prompt 1 — Editorial Router**
-* The series context from **index.md** (if part of a series)
+* The series context from **index.md** (if part of a series; produced by Prompt 3)
 * The technical ground truth from **context.md**
+
+Important:
+- If this article is part of a **series**, `index.md` MUST include the series-level “Reader alignment (4 questions)” block.
+- `context.md` MUST include a “Technical scope map” section. This prompt must use it to keep scope tight.
 
 If any of these are missing, the agent must ask for them.
 
 ---
 
-## Mandatory clarification (ask first)
+## Mandatory clarification (ask first; max 4 total questions)
 
-Before generating `structure.md`, ask up to 4 questions to clarify:
+Before proposing anything, ask only what is missing:
 
-1. Which **type of article** is preferred?
+1) Which article are we shaping?
+   - SINGLE ARTICLE, or SERIES Article N (from `index.md`).
 
-   * Explaining how a problem emerged
-   * Revealing a hidden assumption
-   * Comparing multiple solutions
-   * Describing a decision / epiphany
-   * Explaining an evolving process
+2) Scope confirmation:
+   - Are there any flows/modules that `context.md` lists as in-scope, but you want to **exclude** from *this* article?
+   - Are there any flows/modules you want to **include** even if they’re only mentioned briefly elsewhere?
 
-2. Do you want the article to:
+3) CTA:
+   - What is the intended CTA for this article (subscribe/newsletter + lead magnet, “continue the series”, product promo, job search, comments, etc.)?
 
-   * Focus on one chosen solution
-   * Or strongly compare alternatives
+4) Title constraints (optional):
+   - Any words you want to avoid, or a tone constraint (more “startup pragmatic” vs “academic”)?
 
-3. Who is the **primary reader**?
+---
 
-   * Senior engineers
-   * Product-oriented engineers
-   * Generalist developers
+## Workflow (MANDATORY ORDER)
 
-4. Primary CTA:
+### Step 1 — Rough content scope (in/out)
 
-   * Continue the series
-   * Invite discussion
-   * Soft promotion of services
+- Propose a **scope boundary** for this article expressed as flows/endpoints/behaviors:
+  - In scope (explicit)
+  - Out of scope (explicit)
+- The scope must be consistent with:
+  - the series article map (if any)
+  - the technical scope map in `context.md`
+- Ask the user to confirm or adjust scope.
+
+### Step 2 — Title + hook + CTA
+
+- Propose 3 candidate **title packages** (title + 2–4 sentence hook).
+- Titles must be phrased as a *how-to question* with a credibility/urgency parenthetical, e.g.:
+  - “How do you know your payment system breaks under concurrency (and why it takes weeks to notice)?”
+- Hooks must reuse the series “Reader alignment (4 questions)” block (if in a series) and the story/insight from Prompt 1.
+- Ask the user to pick 1 title package and 1 CTA (or edit them).
+
+### Step 3 — Narrative structure selection
+
+- Propose **3–5 distinct structures** (not templates) that fit the chosen scope + insight.
+- Explain the trade-offs of each.
+- Ask the user to **select exactly one**.
+
+Only after Steps 1–3 are decided, write `structure.md`.
 
 ---
 
@@ -80,28 +107,27 @@ Before generating `structure.md`, ask up to 4 questions to clarify:
 * Explain each structure briefly so the user can compare them
 * Ask the user to **select exactly one** structure
 
-Only **after a structure is selected**:
+Only **after** scope + title/hook + CTA + structure are selected:
 
-* Write a single `structure.md` file
-* That file must contain **only the chosen structure**
+- Write a single `structure.md` file.
+- That file must contain **only** the chosen plan (no alternatives).
+- At this stage it must be **descriptive, not exhaustive**.
 
-At this stage the structure is **descriptive, not exhaustive**.
+`structure.md` must include:
+- Working title (final)
+- Hook (final)
+- Primary CTA (final)
+- Scope boundary (in/out; flows/endpoints/behaviors)
+- Chosen narrative structure:
+  - Section list
+  - For each section: 1–2 lines describing what it accomplishes
+  - Very rough indication of code/visual types that may appear
 
-For the chosen structure, include:
-
-* A list of sections
-* For each section:
-
-  * High-level description (1–2 lines)
-  * Type of reasoning used
-  * Type of code that may appear (very rough)
-  * Possible visual (if any)
-
-Do NOT include deep detail. Refinement happens in the next prompt.
+Do NOT include deep detail. Prompt 5 is where the exhaustive “what to say” plan is produced.
 
 ---
 
-## Canonical article structures
+## Canonical narrative structures
 
 The agent MUST choose from and adapt the following validated structures.
 These are **thinking frameworks**, not templates.
@@ -258,6 +284,8 @@ The file must follow this format:
 * Core insight / pain surfaced
 
 ## Section 1 — <working title>
+
+* Reader alignment coverage (which of the 4 questions this section answers)
 
 * High-level description
 * Type of reasoning

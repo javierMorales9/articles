@@ -1,4 +1,4 @@
-# Prompt 2 — Series Structure & Pain Mapping
+# Prompt 3 — Series Structure & Pain Mapping
 
 ## Purpose
 
@@ -13,6 +13,9 @@ Its sole responsibility is to:
 > * Each article is worth clicking and reading on its own
 > * Each article is anchored in a clear *pain, risk, or uncomfortable truth*
 > * The series as a whole feels cohesive and inevitable
+>
+> In addition, this prompt must produce a short **reader alignment** block (4 questions)
+> that later prompts can reuse to write a strong hook and first section.
 
 The output of this prompt must be saved as:
 
@@ -21,6 +24,9 @@ The output of this prompt must be saved as:
 inside the series folder.
 
 This prompt operates at the level of **titles, pains, and promises**, not implementation.
+
+Additional requirement (SERIES only):
+- `index.md` must also include a lightweight **scope boundary** per article (what it covers / does not cover), expressed as *flows/endpoints/behaviors*, not sections or outlines.
 
 ---
 
@@ -54,9 +60,10 @@ Those concerns are explicitly deferred to later prompts.
 
 The agent will receive:
 
-* The output of the **Editorial Router** (1_editorial_router.md)
+* The output of the **Editorial Router** (`prompts/1_editorial_router.md`)
+* The series-level **implementation context** (`context.md`) produced by `prompts/2_context_extractor.md`
 
-Code access is **not required** at this stage.
+Code access is optional, but `context.md` must be treated as the primary implementation input at this stage (this prompt is editorial, not a code review).
 
 ---
 
@@ -64,10 +71,12 @@ Code access is **not required** at this stage.
 
 The agent must:
 
-1. Identify the **core pain or risk** that unifies the entire series
-2. Break that pain into **distinct, standalone pains**
-3. Map each pain to a **single article**
-4. Ensure each article can be read independently
+ 1. Identify the **core pain or risk** that unifies the entire series
+ 2. Break that pain into **distinct, standalone pains**
+ 3. Map each pain to a **single article**
+ 4. Ensure each article can be read independently
+ 5. Capture the **reader alignment** answers once, at the series level (reusing Prompt 1 where possible)
+ 6. Capture a high-level **scope boundary** for each article (explicit in-scope and out-of-scope)
 
 The agent must think like an editor asking:
 
@@ -90,6 +99,7 @@ You must work at the level of:
 - article titles
 - reader pain points
 - core promises
+- scope boundaries expressed as flows/endpoints/behaviors
 
 Rules:
 - Do NOT write article outlines or sections
@@ -99,11 +109,33 @@ Rules:
 
 Start by asking clarification questions (max 4 at a time) if needed.
 
+Mandatory: before writing the series structure, you must capture answers to the 4 “reader alignment” questions below.
+
+Reuse rule:
+- Prompt 1 (router) should already have captured answers for Q1–Q4.
+- Therefore, in a SERIES, you should typically need **zero** additional reader-alignment questions here unless something is missing/unclear.
+
+Reader alignment questions:
+1) What do you and the potential readers have in common (shared context)?
+2) What essential ability/requirement was broken/improved, and why is it important?
+3) How will this series help the reader protect that ability/requirement?
+4) What will the reader learn about correctness under concurrency from the series?
+
+Additional per-article “usefulness” question (MANDATORY):
+For each article, also answer:
+- What specific reader ability does this article strengthen, and under what triggering conditions/events does it apply?
+
 ---
 
 ### REQUIRED OUTPUT STRUCTURE
 
 # Series Structure
+
+## 0. Reader alignment (4 questions)
+- 1) Common ground
+- 2) Broken/improved requirement + why it matters
+- 3) How the series helps
+- 4) Concurrency correctness takeaway
 
 ## 1. Series spine
 - Core pain or risk the entire series revolves around
@@ -118,6 +150,12 @@ For each article:
 - Core pain / risk exposed
 - What false assumption this article challenges
 - Why this article matters *on its own*
+- Specific insight / capability gained
+  - What ability the reader gains
+  - Trigger conditions/events where it applies
+- Scope boundary (flows/endpoints/behaviors)
+  - In scope (explicit)
+  - Out of scope (explicit)
 - Optional: high-level actionable direction (only as a response to the pain, not a how-to)
 
 ## 3. Series coherence
@@ -130,7 +168,7 @@ For each article:
 
 ## 5. Next steps
 - Which article should be written first
-- Which prompt to run next for that article
+- Which prompt to run next for that article (Prompt 4 → Prompt 5 → Prompt 6)
 ```
 
 ---

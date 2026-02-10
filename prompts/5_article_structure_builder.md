@@ -7,6 +7,9 @@ This prompt takes **one single article structure**, already selected and persist
 It does **not** write the article.
 Its sole responsibility is to produce a **detailed `structure.md`** that makes writing the article almost mechanical.
 
+Key constraint: the output is **what to say**, not **how to say it**.
+Use concrete bullet points, examples, and artifact lists — not polished prose paragraphs.
+
 This is the prompt where **all editorial decisions are made explicit**.
 
 ---
@@ -29,6 +32,10 @@ If any of these are missing or inconsistent, the prompt must stop and ask for cl
 - Keep **the same sections and ordering**
 - Add **detail and precision** to each section
 - Make scope, examples, code and visuals explicit
+- Make the “transaction/concurrency dance” explicit when relevant (step-by-step interleaving + pseudocode + equivalent SQL)
+- Specify the exact **code blocks** to include (what snippet, from where, and why it is load-bearing)
+- Specify what you will **say about each code block** (explanation beats; what to notice; what misconception it corrects)
+- Specify the section’s **open loops** (questions/tensions introduced) and where each loop is closed
 
 This prompt **refines** the structure — it does not reinterpret it.
 
@@ -53,6 +60,9 @@ If something feels missing, it must be flagged explicitly instead of being silen
 - Output file: **overwrite `structure.md`**
 - Be explicit and concrete
 - Prefer clarity over brevity
+- Prefer bullet lists over paragraphs
+- Do not write final article sentences; write the checklist of claims, steps, examples, and artifacts
+- Prefer a single running example (a specific company/product workflow) reused across sections for consistency
 
 ---
 
@@ -60,10 +70,15 @@ If something feels missing, it must be flagged explicitly instead of being silen
 
 For **every section** in `structure.md` (including Introduction and Conclusion), expand it using the following schema.
 
-### 1. What this section covers
-- Core ideas that must be explained
-- Logical order of those ideas
-- Key message the reader should leave with
+### 1. What this section covers (talking points + explanation beats)
+- Bullet list of the exact claims/points this section must communicate
+- Logical order (1 → 2 → 3)
+- Explanation beats (how to explain, without writing prose):
+  - Start from the reader’s likely belief
+  - Show the counterexample or failure mode
+  - State the invariant/requirement in plain language
+  - Tie back to the article’s core insight
+- One-sentence “section takeaway” (plain language)
 
 ### 2. What this section deliberately does NOT cover
 - Topics explicitly out of scope
@@ -71,16 +86,20 @@ For **every section** in `structure.md` (including Introduction and Conclusion),
 - Explanations deferred to other sections or articles
 
 ### 3. Examples
-- Primary example (if any)
-- Secondary examples (if any)
+- Primary example (required)
+  - Must be fully specific: company/product, trigger event, numbers, timelines, credits/costs, and what “correct” means.
+- Secondary examples (optional)
 - Whether examples are:
   - Introduced here
   - Continued from a previous section
   - Reused across the article
 
 Examples must be **concrete and realistic** (names, numbers, situations).
+If the article is about concurrency correctness, the examples section must include:
+- at least one “two requests at the same time” micro-scenario with concrete values
+- at least one “burst” scenario (e.g., hundreds/thousands of requests) explaining why the bug appears *now*
 
-### 4. Code to include
+### 4. Code to include (artifacts + explanation plan)
 - Files involved
 - Functions / methods involved
 - Type of snippet:
@@ -89,7 +108,17 @@ Examples must be **concrete and realistic** (names, numbers, situations).
   - Before / after
   - SQL
 
-Do NOT paste code yet. Only specify **what** will be shown and **why**.
+Do NOT paste large code yet. Only specify **exactly what** will be shown and **why**.
+
+For each planned code block, include:
+- Block ID: `CB1`, `CB2`, ...
+- Snippet type: pseudocode | diff | SQL | before/after
+- Location: exact file path(s) + function/method name(s)
+- Size guidance: ~5–25 lines per block (keep it load-bearing)
+- What the reader should notice (1–3 bullets)
+- What misconception this block corrects (1 bullet)
+- What invariant this block protects (1 bullet)
+- What you will say immediately after the block (bullet beats; no prose)
 
 ### 5. Visuals / figures
 - Type of visual (diagram, chart, table, screenshot)
@@ -98,11 +127,22 @@ Do NOT paste code yet. Only specify **what** will be shown and **why**.
 
 Visuals should reinforce reasoning, not decorate the article.
 
-### 6. Open loops
+### 6. Concurrency “dance” (ONLY if relevant to this section)
+- Interleaving steps (T1/T2 or Request A/Request B) with concrete values
+- Pseudocode version
+- Equivalent SQL version (even if simplified)
+- What invariant is violated or preserved at each step
+
+### 7. Open loops (required)
 - Questions or tensions introduced in this section
 - Where they are resolved:
   - Later in the article
   - In another article of the series
+
+Each open loop must be phrased as a question the reader would naturally ask, e.g.:
+- “Why didn’t transactions save us?”
+- “If we lock, won’t we kill throughput?”
+- “How do retries not double-charge?”
 
 ---
 
@@ -114,6 +154,7 @@ In addition to the standard schema, the **Introduction** must explicitly define:
 - Specific pain or risk being addressed
 - Why this problem matters **now**
 - Implicit promise of what the reader will understand by the end
+- Confirm the chosen title/hook/CTA (do not change them; only refine the supporting content plan)
 
 ---
 
@@ -177,119 +218,194 @@ This example is **not article prose**.
 It represents the **execution-ready structure** that this prompt must produce.
 
 
+### ✅ Good example (detailed, executable “what to say” plan)
+
 ```md
 # Article Structure
 
+## Title / Hook / CTA (from Prompt 4; do not change)
+- Title: How do you know your payment system breaks under concurrency (and why it takes weeks to notice)?
+- Hook: (2–4 sentences; selected in Prompt 4)
+- Primary CTA: Subscribe to the newsletter and get the “Concurrency Correctness Checklist” PDF.
+
+## Scope boundary (from Prompt 4; do not drift)
+- In scope:
+  - Automatic campaign card creation that mutates credits (the hot path under burst concurrency)
+  - Card deletion as a second example of “shared state mutation under contention”
+  - Postgres row-level locks (`SELECT ... FOR UPDATE`) + lock ordering
+  - Retry-on-contention at the transaction layer (not “retry the whole HTTP request”)
+  - Deterministic k6 correctness oracle + CI wiring
+- Out of scope:
+  - Purchases/compensation flows
+  - One-time campaign activation bulk charging
+  - Distributed locking/queues as implemented systems (compare conceptually only)
+
 ## Introduction
 
-### What this section covers
-- Introduce the core insight: concurrency bugs are about shared state, not raw speed.
-- Surface the concrete pain: incorrect credit balances caused by simultaneous API requests.
-- Explain why this problem matters now: automation, integrations, and bursty traffic patterns.
+### 1. What this section covers (talking points + explanation beats)
+- Talking points (order)
+  1) Money-like counters can be wrong without any 500s.
+  2) Concurrency is the condition that turns “seems fine” into “silently wrong.”
+  3) The fix path is: invariant → reproducible harness → DB coordination primitive → CI gate.
+- Explanation beats
+  - Reader belief: “Transactions mean correctness.”
+  - Counterexample: 1,000 independent requests in 1 second; totals don’t add up.
+  - Invariant: “credits deducted == total cost of cards created” (state it explicitly).
+  - Tie-back: the article gives a repeatable method to *know* your invariant holds under contention.
+- Section takeaway: Silent drift is worse than downtime because you don’t notice until money is missing.
 
-### What this section deliberately does NOT cover
-- Detailed explanation of database locking mechanisms.
-- Any specific implementation details.
+### 2. What this section deliberately does NOT cover
+- Any deep locking explanation
+- Any code walkthrough
 
-### Examples
-- Primary example: **“Christmas Reactivation” campaign**
-  - 1,042 letters created via API in ~2 seconds.
-  - Two concurrent requests attempt to deduct credits simultaneously.
+### 3. Examples
+- Primary running example: **Best For Your Dog** (ecommerce) “3rd purchase thank-you letter”
+  - Trigger: customer’s 3rd dog-biscuits purchase → create a card via API
+  - Costs: ES=3 credits, international=5 credits
+  - Starting credits: 10
+  - Burst: webhook fan-out + retries creates ~1,000 cards in ~1 second
+  - Correctness: `afterAvailableCredits == beforeAvailableCredits - sum(cost(createdCards))` (or due credits matches remainder, depending on system)
+- Micro-scenario (for the dance later)
+  - Starting `availableCredits=6`
+  - Request A cost=3, Request B cost=3 concurrently
+  - Correct end: 0 (incorrect end: 3)
 
-### Code to include
-- None in this section.
+### 4. Code to include (artifacts + explanation plan)
+- None (keep the hook code-free).
 
-### Visuals / figures
-- Diagram showing two concurrent requests racing to update the same credit balance.
+### 5. Visuals / figures
+- V1: timeline of Request A + Request B overlapping on a shared counter (show 6 → 3 → 0 vs wrong 6 → 3).
 
-### Open loops
-- Why did this work fine before?
-- Why did the issue only appear at scale?
+### 6. Concurrency “dance”
+- Defer (introduce tension only).
 
----
-
-## Section 1 — The real constraints
-
-### What this section covers
-- How automated campaigns generate short-lived request bursts.
-- Why credits behave as shared mutable state.
-- Why naive atomic updates fail under concurrency.
-
-### What this section deliberately does NOT cover
-- Specific solutions or fixes.
-
-### Examples
-- Continue the “Christmas Reactivation” example.
-
-### Code to include
-- File: `packages/domain/credits/CreditService.ts`
-- Function: `deductCredits`
-- Snippet type: before / after (conceptual).
-
-### Visuals / figures
-- Timeline diagram of overlapping requests.
-
-### Open loops
-- How can this be fixed safely?
+### 7. Open loops (required)
+- “If both requests returned 200, how can the counter be wrong?”
+  - Close: Section 1 (lost update dance).
+- “How do we reproduce this on demand instead of arguing about it?”
+  - Close: Section 2 (k6 oracle).
 
 ---
 
-## Section 2 — Solutions we considered
+## Section 1 — Why this bug exists (lost update on shared state)
 
-### What this section covers
-- Compare optimistic updates, DB locking, and queue-based approaches.
-- Define evaluation criteria: correctness, simplicity, performance.
+### 1. What this section covers (talking points + explanation beats)
+- Talking points (order)
+  1) Automation changes the concurrency shape (bursts, fan-out, retries, independent requests).
+  2) Credits are shared mutable state: many writers, one value.
+  3) Read-modify-write is where lost updates happen.
+- Explanation beats
+  - Start: point to the shared variable.
+  - Show: the interleaving that violates the invariant.
+  - Name: “lost update.”
+  - Tie-back: the invariant is a total-property, not a per-request property.
+- Section takeaway: Two correct requests can produce an incorrect total without coordination.
 
-### What this section deliberately does NOT cover
-- Deep implementation details.
+### 2. What this section deliberately does NOT cover
+- The fix (locks/retries) — only the failure class.
 
-### Examples
-- Apply each approach to the same campaign scenario.
+### 3. Examples
+- Reuse micro-scenario: `availableCredits=6`, `cost=3`, A+B concurrently.
 
-### Code to include
-- Pseudocode for locking and retry placement.
+### 4. Code to include (artifacts + explanation plan)
+- CB1 (pseudocode; naive read-modify-write baseline)
+  - Snippet type: pseudocode
+  - Location: pseudocode block (not repo code)
+  - Size: ~8–12 lines
+  - Notice:
+    - both requests can read the same balance
+    - last write wins
+  - Misconception corrected: “a transaction automatically preserves cross-request invariants.”
+  - Invariant: violated (this block demonstrates the break).
+  - What to say after:
+    - walk the reader through the exact interleaving (Dance D1)
+    - define “lost update” in one sentence
 
-### Visuals / figures
-- Comparison table of approaches vs constraints.
+### 5. Visuals / figures
+- V2: interleaving table (Step, A, B, observed credits).
 
-### Open loops
-- Which approach satisfies correctness without overengineering?
+### 6. Concurrency “dance”
+- Dance D1 (lost update; concrete values)
+  - Given: `availableCredits=6`, `cost=3`
+  - A reads 6
+  - B reads 6
+  - A writes 3
+  - B writes 3
+  - Invariant violated: expected delta=6, observed delta=3
+- Equivalent SQL (simplified):
+  - `SELECT available_credits FROM company WHERE id=$1;`
+  - `UPDATE company SET available_credits=$2 WHERE id=$1;`
+
+### 7. Open loops (required)
+- “So what actually prevents this: atomic UPDATE, SERIALIZABLE, advisory locks, queues, FOR UPDATE?”
+  - Close: later section or next article (depending on scope).
 
 ---
 
-## Section 3 — Why we chose this approach
+## Section 2 — Proving it with a deterministic k6 correctness oracle
 
-### What this section covers
-- Why `SELECT FOR UPDATE` fits the constraints.
-- Trade-offs and accepted limitations.
+### 1. What this section covers (talking points + explanation beats)
+- Talking points (order)
+  1) If the bug is nondeterministic, you can’t fix it — you can only hope.
+  2) A correctness harness needs an oracle (expected vs actual), not just throughput metrics.
+  3) k6 constraints: no shared mutable state across VUs → you must design determinism.
+- Explanation beats
+  - Show how the oracle turns “maybe” into “red/green.”
+  - Explain why determinism matters more than high RPS.
+- Section takeaway: A deterministic oracle is what turns concurrency debugging into engineering.
 
-### What this section deliberately does NOT cover
-- Distributed locking.
+### 2. What this section deliberately does NOT cover
+- Full k6 tutorial; only the pieces required to build a correctness oracle.
 
-### Examples
-- Final walkthrough of the campaign using row-level locking.
+### 3. Examples
+- Use the same costs + recipients model from Best For Your Dog to compute an exact expected total.
 
-### Code to include
-- SQL query with `SELECT ... FOR UPDATE` and transaction boundary.
+### 4. Code to include (artifacts + explanation plan)
+- CB2 (repo excerpt; deterministic oracle)
+  - Snippet type: excerpt (small block) / diff
+  - Location: `apps/web/src/tests/performance/create_cards_for_campaign.ts` (`SharedArray` + expected total + `teardown()` invariant check)
+  - Size: ~15–25 lines (only the oracle parts)
+  - Notice:
+    - deterministic list of recipients
+    - expected total computed once
+    - teardown asserts the invariant
+  - Misconception corrected: “load tests can’t validate correctness.”
+  - Invariant: `after = before - expectedTotalCost` (epsilon tolerated).
+  - What to say after:
+    - why `SharedArray` exists (init-time data)
+    - how k6 maps iteration→recipient deterministically
+    - how this reproduces the race reliably
 
-### Visuals / figures
-- Before / after diagram of serialized access.
+### 5. Visuals / figures
+- V3: “oracle diagram” (inputs → operations → invariant check).
 
-### Open loops
-- What happens if traffic grows 10×?
+### 6. Concurrency “dance”
+- Optional: show that the test creates contention by design (VUs/iterations/sleeps).
+
+### 7. Open loops (required)
+- “Great — now how do we make the database enforce the invariant under contention?”
+  - Close: later section / next article.
 
 ---
 
 ## Conclusion
+...
+```
 
-### What this section covers
-- Summarize the decision and reinforce the core insight.
+### ❌ Bad example (what not to produce)
 
-### CTA
-- Continue to the next article in the series.
+```md
+## Examples
+- Imagine a company.
+- Lots of requests happen at the same time.
+- Credits sometimes mismatch.
 
----
+## Code to include
+- Some code about locking.
+```
 
-## What This Article Does NOT Cover
-- Distributed locking mechanisms.
-- Queue-based architectures.
+Why this is bad:
+- No specific company/workflow, numbers, or trigger event → the reader can’t simulate it mentally.
+- No invariant defined → “correctness” is hand-wavy.
+- No exact code blocks + locations → the writer can’t execute.
+- No open loops → no tension map; the piece becomes a list of facts.

@@ -1,8 +1,13 @@
-# Article Context Extractor
+# Prompt 2 — Work Context Extractor (Series or Single)
 
 ## Purpose
 
-This prompt is responsible for **building the full technical context of a specific feature**. Nothing else.
+This prompt is responsible for building the **full technical context of a piece of work** so it can be written about as:
+
+- a **SERIES** (single shared context for the whole series), or
+- a **SINGLE ARTICLE** (one shared context for the article)
+
+Nothing else.
 
 It does **not** write an article.
 It does **not** decide narrative, tone, or motivations.
@@ -10,14 +15,20 @@ It does **not** extract code snippets.
 
 Its only job is to:
 
-1. Extract **accurate, explicit knowledge** from the feature author about the work that was done.
-2. Inspect the **feature branch (or a specified commit range)** to identify the **key files and functions** involved, and explain their role in the feature.
+1. Inspect the **feature branch (or a specified commit range)** to identify the **key files and functions** involved, and explain their role in the feature.
+2. Interview the feature author **only to fill gaps** that are not obvious from the code changes (intent, rejected alternatives, constraints).
+3. Produce a **technical scope map** for later prompts:
+   - what technical areas are “in play” for writing (in general)
+   - what technical areas are explicitly excluded to keep the work focused
 
 The result of this prompt is a single file:
 
 > **`context.md`**
 
-stored inside the folder dedicated to the article.
+stored in the folder that is being written about:
+
+- If the work is a **SERIES**: store `context.md` in the **series root folder**.
+- If the work is a **SINGLE ARTICLE**: store `context.md` in the **article folder**.
 
 ---
 
@@ -38,6 +49,8 @@ Those will be handled by other prompts.
 Here we only answer:
 
 > *What was built, how it works, and where it lives in the codebase.*
+
+This includes a **technical scope map** (Section 7) to prevent later prompts from drifting into unrelated subsystems.
 
 ---
 
@@ -64,9 +77,24 @@ Your goal is to fully understand the implementation so another engineer could wo
 
 ---
 
-## Phase 1 — Interview the feature author
+## Phase 1 — Inspect the feature branch (FIRST)
 
-Your first task is to interview the person who implemented the feature.
+Your first task is to inspect the code changes (commit range / linked `ref/` snapshot).
+
+Goal: identify what is already obvious from the diff (flows, files, primitives used, tests, CI wiring) so you do **not** ask redundant questions.
+
+### Tasks
+
+1. Review the changes introduced by the feature.
+2. Identify the **most relevant files**.
+3. Within those files, identify the **key functions, classes, or modules**.
+4. Identify any **unknowns** that require author input (gaps, intent, alternatives, constraints).
+
+### Important notes
+
+* Do **not** extract full code snippets.
+* Do **not** explain line‑by‑line logic.
+* Focus on **structure and responsibility**, not implementation detail.
 
 You must ask questions covering, at minimum, the following areas:
 
@@ -99,31 +127,24 @@ You must ask questions covering, at minimum, the following areas:
 
 You may add **additional questions** if they are necessary to fully understand the work, but stay strictly within implementation scope.
 
-Do not move to Phase 2 until Phase 1 is sufficiently answered.
+### Question discipline (MANDATORY)
 
----
+- Ask **only** the questions that remain unanswered after Phase 1 inspection.
+- Do not ask about facts that are directly readable from the code changes (paths, primitives used, test names, CI steps).
+- Maximum 4 questions per turn still applies.
 
-## Phase 2 — Inspect the feature branch
+Do not move to Phase 2 until Phase 1 inspection is complete and the necessary questions have been answered.
 
-Once the human input is complete, you must inspect the code changes.
+## Phase 2 — Interview the feature author (SECOND)
 
-### Inputs
+After Phase 1 inspection, interview the author to fill gaps discovered during inspection.
 
-* Feature branch name **or**
-* Explicit commit or commit range
-
-### Tasks
-
-1. Review the changes introduced by the feature.
-2. Identify the **most relevant files**.
-3. Within those files, identify the **key functions, classes, or modules**.
-4. Explain the role each one plays in the overall feature.
-
-### Important notes
-
-* Do **not** extract full code snippets.
-* Do **not** explain line‑by‑line logic.
-* Focus on **structure and responsibility**, not implementation detail.
+The interview must still cover, at minimum (only if not already clear from code):
+- Feature definition (before/after)
+- Design decisions (alternatives + trade-offs)
+- Constraints/assumptions
+- Testing/validation intent
+- Operational expectations under load
 
 ---
 
@@ -133,6 +154,11 @@ You must output a single Markdown document with **exactly** the following struct
 
 ```md
 # Feature Context
+
+## 0. Scope
+- Form: SERIES | SINGLE ARTICLE
+- In-scope flows (explicit)
+- Out-of-scope flows (explicit)
 
 ## 1. Feature overview
 - What the feature does
@@ -164,6 +190,10 @@ You must output a single Markdown document with **exactly** the following struct
 ### Key functions / modules
 - functionOrModuleName — role in the feature
 - anotherFunction — role in the feature
+
+## 7. Technical scope map
+- In-scope technical areas (names only)
+- Out-of-scope technical areas (names only)
 ```
 
 ---

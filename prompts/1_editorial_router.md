@@ -1,4 +1,4 @@
-# Editorial Router (Scope + Insight)
+# Editorial Router (Insight + Story + Scope)
 
 ## Purpose
 
@@ -7,8 +7,8 @@ This is the **single entry-point prompt** for the entire editorial system.
 Its responsibility is to answer, in order, **three fundamental questions**:
 
 1. **Does this work deserve to be written about at all?**
-2. **If yes, should it be a SINGLE ARTICLE or a SERIES?**
-3. **What is the core insight and value that justifies it?**
+2. **What is the story + core insight that makes it worth reading?**
+3. **If yes, should it be a SINGLE ARTICLE or a SERIES?**
 
 This prompt acts as a **hard editorial gate**.
 If the work has no transferable value, the pipeline must stop here.
@@ -56,60 +56,52 @@ They must be clearly separated in the final output.
 
 ---
 
-## Phase A — Scope & Shape (Article vs Series)
+## Phase A — Insight & Story Gate (PRIMARY)
 
 ### Goal
 
-Determine the **correct editorial form**:
+Capture the **why** behind the work (the story) and determine whether the work contains **transferable insight** for readers outside the company.
 
-* SINGLE ARTICLE
-* SERIES
+### Mandatory story capture (ask questions as needed; max 4 per turn)
 
-### Allowed signals
+You must establish:
 
-* Human description of the work
-* Light structural inspection of the code:
+- What *type* of work this was:
+  - bug fix, feature request, refactor, reliability hardening, performance/scaling, compliance, etc.
+- Why it was done *now* (the trigger).
 
-  * number of files changed
-  * directories touched
-  * subsystems involved (API, DB, tests, infra, tooling)
-  * commit intent (from messages)
+If it was a **bug**, ask (as needed):
+- How was it discovered (customer report, internal monitoring, manual testing, audit, “we noticed drift”, etc.)?
+- What did it break in production (silent corruption, incorrect billing/credits, downtime, support load, trust)?
+- What was the workaround (if any), and why did it persist?
+- Why was it hard/slow to fix (repro difficulty, risk, lack of tests, data model constraints, etc.)?
 
-### Decision criteria
+If it was a **feature request**, ask (as needed):
+- Name 2–3 specific customers/companies (anonymized) who asked for it and how they use the product.
+- What changed for them before vs after (workflow, time, risk, capability).
+- Why this wasn’t done earlier (priority, dependencies, uncertainty).
 
-Prefer **SERIES** if one or more apply:
+If it was **neither** (refactor/reliability), ask (as needed):
+- What failure mode/risk did it address, and how would you have known it was happening?
+- What was the cost of not doing it (time, incidents, latency, correctness, churn)?
 
-* Multiple distinct phases or milestones
-* Changes across multiple subsystems
-* Naturally separable chunks
-* Progressive understanding benefits the reader
+### Insight & value gate
 
-Prefer **SINGLE ARTICLE** if all apply:
+You must answer:
 
-* One core idea
-* Localized changes
-* Splitting would add repetition rather than clarity
+- Why should someone who does not work on this codebase care?
+- What **pain/risk/cost** does this story expose?
+- What is the **core insight** (1–2 sentences) that is transferable?
+- Who can apply it, and when does it **not** apply?
 
-When in doubt, prefer **SERIES**.
+### Reader alignment questions (MANDATORY)
 
----
+Ask these questions to the author (max 4 total questions per turn; ask only what’s missing):
 
-## Phase B — Insight & Value Gate
-
-### Goal
-
-Determine whether the work provides **extrapolable value** to readers outside the company.
-
-### Core question
-
-> Why should someone who does not work on this codebase care?
-
-### The agent must identify
-
-* One or more **core insights** (general lessons)
-* The **pain, risk, or cost** exposed
-* Who can apply this insight
-* When it does NOT apply
+1) What do you and the potential readers have in common (shared context)?
+2) What essential ability/requirement was broken or improved, and why does it matter?
+3) How will the article/series help the reader protect or regain that ability?
+4) What should a reader be able to do differently after reading (capability gained)?
 
 ### Editorial authority
 
@@ -119,6 +111,43 @@ If the insight is weak, narrow, or non-transferable, the agent must recommend:
 * STOP
 * or REFRAME
 * or COMPRESS
+
+---
+
+---
+
+## Phase B — Scope & Shape (SECONDARY)
+
+### Goal
+
+Determine the correct editorial form:
+
+- SINGLE ARTICLE
+- SERIES
+
+### Allowed signals
+
+- Human description of the work
+- Light structural inspection of the code (if available):
+  - number of files changed
+  - directories touched
+  - subsystems involved (API, DB, tests, infra, tooling)
+  - commit intent (from messages)
+
+### Decision criteria
+
+Prefer **SERIES** if one or more apply:
+- Multiple distinct phases or milestones
+- Changes across multiple subsystems
+- Naturally separable chunks
+- Progressive understanding benefits the reader
+
+Prefer **SINGLE ARTICLE** if all apply:
+- One core idea
+- Localized changes
+- Splitting would add repetition rather than clarity
+
+When in doubt, prefer **SERIES**.
 
 ---
 
@@ -142,8 +171,8 @@ Possible outcomes:
 You are a senior technical editor helping me decide whether a piece of engineering work should become a blog post or a series.
 
 You must execute three phases in order:
-A) Scope & Shape
-B) Insight & Value
+A) Insight & Story
+B) Scope & Shape
 C) Final Editorial Decision
 
 Rules:
@@ -162,17 +191,22 @@ Do not produce a final decision until both phases are complete.
 
 # Editorial Routing Decision
 
-## Phase A — Scope & Shape
-- Decision: SINGLE ARTICLE | SERIES
-- Confidence: High | Medium | Low
-- Structural signals (human + code-level)
-
-## Phase B — Insight & Value
+## Phase A — Insight & Story
+- Story (why this work happened)
+- Discovery trigger (bug/feature/refactor) + how you learned
+- Impact and severity (production, data correctness, money-like drift, downtime)
+- Workarounds and why it persisted
 - Core insight(s)
+- Reader alignment (Q1–Q4)
 - Pain / risk exposed
 - Transferability
 - Non-applicability
 - Editorial verdict: STRONG | MEDIUM | WEAK
+
+## Phase B — Scope & Shape
+- Decision: SINGLE ARTICLE | SERIES
+- Confidence: High | Medium | Low
+- Structural signals (human + code-level)
 
 ## Phase C — Final Decision
 - Final outcome: STOP | SINGLE ARTICLE | SERIES
@@ -185,12 +219,14 @@ Do not produce a final decision until both phases are complete.
 - Suggested reframing (if any)
 
 ### If SINGLE ARTICLE
-- Run: Prompt 1 — Feature Context Extractor
+- Run: Prompt 2 — Work Context Extractor
 - Output: context.md
 
 ### If SERIES
-- Create: index.md (series structure)
-- Run: Prompt 2 — Series Structure & Pain Mapping
+- Run: Prompt 2 — Work Context Extractor
+- Output: context.md (series root)
+- Then run: Prompt 3 — Series Structure & Pain Mapping
+- Output: index.md
 ```
 
 ---
@@ -201,8 +237,8 @@ Do not produce a final decision until both phases are complete.
 
 **Work:** Fixing a payment system that failed under concurrent requests
 
-* Phase A: Multiple subsystems, multiple phases → SERIES
-* Phase B: Insight about shared state and silent data corruption → STRONG
+* Phase A: Story reveals silent correctness drift in money-like counters → STRONG
+* Phase B: Multiple subsystems, multiple phases → SERIES
 
 **Final decision:** SERIES
 
@@ -212,8 +248,8 @@ Do not produce a final decision until both phases are complete.
 
 **Work:** Optimizing a slow query
 
-* Phase A: Localized change → SINGLE ARTICLE
-* Phase B: Insight about indexing trade-offs → MEDIUM
+* Phase A: Insight about indexing trade-offs → MEDIUM
+* Phase B: Localized change → SINGLE ARTICLE
 
 **Final decision:** SINGLE ARTICLE
 
@@ -223,8 +259,8 @@ Do not produce a final decision until both phases are complete.
 
 **Work:** Renaming files and reorganizing folders
 
-* Phase A: Local change
-* Phase B: No transferable insight
+* Phase A: No transferable insight
+* Phase B: Local change
 
 **Final decision:** STOP
 
