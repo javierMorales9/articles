@@ -132,6 +132,9 @@ You may add **additional questions** if they are necessary to fully understand t
 - Ask **only** the questions that remain unanswered after Phase 1 inspection.
 - Do not ask about facts that are directly readable from the code changes (paths, primitives used, test names, CI steps).
 - Maximum 4 questions per turn still applies.
+- **Exception (MANDATORY): scope confirmation.**
+  - Even if the diff is clear, you must always propose a concrete scope boundary (explicit in-scope flows + explicit out-of-scope flows) and ask the author to confirm/correct it.
+  - Your first interview questions must include at least **2 scope questions** (still counting toward the 4-question cap).
 
 Do not move to Phase 2 until Phase 1 inspection is complete and the necessary questions have been answered.
 
@@ -145,6 +148,18 @@ The interview must still cover, at minimum (only if not already clear from code)
 - Constraints/assumptions
 - Testing/validation intent
 - Operational expectations under load
+
+### Mandatory confirmation checkpoint (do not skip)
+
+Even if you believe the diff already answers these, you must obtain explicit author confirmation/correction before writing `context.md`:
+
+- Scope boundary: in-scope flows + out-of-scope flows (ask at least 2 scope questions; see Question discipline).
+- Feature definition: what behavior changed before vs after (1 confirmation question minimum).
+- Alternatives: which designs were actually tested/prototyped vs only considered (1 question minimum).
+- Testing: which test(s) are the primary regression harness and what invariant(s) they assert (1 question minimum).
+- Operational load: what burst/concurrency profile this must handle (1 question minimum).
+
+You may need multiple turns due to the max 4 questions/turn rule. Do not write `context.md` until these are answered.
 
 ---
 

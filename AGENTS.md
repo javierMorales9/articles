@@ -154,3 +154,9 @@ Prompts are “workflow code”: small changes can have big downstream effects. 
 - Articles in this repo default to first-person voice unless explicitly requested otherwise.
 - Prefer readability over brevity when it helps understanding; teach concepts and avoid assuming reader context.
 - When explaining concurrency, use a step-by-step interleaving ("dance") with a concrete example and include both pseudocode and equivalent SQL.
+- For any new “write about this work” request, start with `prompts/1_editorial_router.md` unless the user explicitly tells you to resume at a later prompt.
+- For `prompts/2_context_extractor.md` and `prompts/3(s)_series_organizer.md`, always do an explicit scope pass:
+  - Propose a specific in-scope list and out-of-scope list (flows/behaviors).
+  - Ask the author to confirm/correct scope (max 4 questions per turn rule still applies).
+  - Do not proceed to writing `context.md` / `index.md` until scope is confirmed.
+  - Also ask the mandatory confirmation questions declared inside each prompt (feature definition, alternatives, testing invariants, operational expectations, and series-map confirmation).

@@ -115,6 +115,19 @@ Reuse rule:
 - Prompt 1 (router) should already have captured answers for Q1–Q4.
 - Therefore, in a SERIES, you should typically need **zero** additional reader-alignment questions here unless something is missing/unclear.
 
+Additional mandatory questions (scope) — even if router answers exist:
+- Before you write `index.md`, you must ask at least **2 scope confirmation questions**:
+  - confirm the series-level in-scope flows/behaviors
+  - confirm the explicit out-of-scope list (what readers should NOT expect)
+- These questions count toward the max 4 questions per turn.
+
+Additional mandatory questions (series map) — do not skip:
+- Before you write `index.md`, you must also confirm (at least 1 question each, possibly across turns):
+  - the intended number of articles, and why (not just “2 vs 3”, but what each one must achieve)
+  - the per-article scope boundaries (flows/behaviors) are correct and minimal
+
+Do not write `index.md` until scope + series-map confirmations are answered.
+
 Reader alignment questions:
 1) What do you and the potential readers have in common (shared context)?
 2) What essential ability/requirement was broken/improved, and why is it important?

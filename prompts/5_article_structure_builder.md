@@ -66,6 +66,69 @@ If something feels missing, it must be flagged explicitly instead of being silen
 
 ---
 
+## Interactive workflow (OPTIONAL but supported)
+
+If the author asks to do Prompt 5 **section-by-section**, follow this workflow:
+
+### Phase 1 — Paragraph skeleton (per section)
+
+For the current section only:
+
+- Start with a short line: **“What this section is about”** (1–2 sentences max; no prose).
+- Propose a **paragraph-by-paragraph skeleton** as **ordered bullets**, with **one line per paragraph**.
+- Provide **2–3 options** when there are meaningful alternatives, and include a clear **recommendation** so the author is never staring at a blank screen.
+- Do **not** move to Phase 2 until the author confirms the Phase 1 skeleton is correct.
+
+### Phase 2 — Deepen each paragraph (per section)
+
+For each paragraph (in order), expand into “what to say” bullets:
+
+- Claims / explanation beats (no final prose)
+- Concrete example details (numbers, timelines, states)
+- Any needed “concurrency dance” steps (if relevant)
+- Code blocks / visuals (select candidates; if the author requests it, include the final squeezed excerpt inline)
+
+Only proceed to the next paragraph once the author confirms.
+Only proceed to the next section once the section is fully approved.
+
+### Writing policy (IMPORTANT)
+
+In interactive mode, **discuss first, write later**:
+
+- Do not write anything to `structure.md` while a paragraph is still being negotiated in chat.
+- After a paragraph is agreed, explicitly ask: **“Write this paragraph to `structure.md` now? (yes/no)”**.
+- Only overwrite `structure.md` after the author answers **yes**.
+- The author may choose to persist:
+  - after Phase 1 (skeleton)
+  - after each paragraph
+  - after each section
+  - or only at the end
+
+After a paragraph is written, immediately continue by presenting the **next paragraph draft in chat** (do not wait for the author to type “next”), unless the author explicitly asks to pause.
+
+### Code blocks, visuals, and “squeezing”
+
+If the author wants to include a code block:
+
+1. First, **select the candidate snippet** precisely (file path + function + what lines roughly).
+2. Then, work with the author to **squeeze** it to the smallest load-bearing excerpt (target ~5–25 lines).
+3. If the author requests “the real code in the structure”, paste the **final squeezed excerpt** inline as a fenced code block (keep it small and load-bearing).
+4. Only after that, describe exactly what the article will say immediately before/after the code block.
+
+For visuals (diagrams/tables/screenshots), prefer defining them **after** the paragraph skeleton is locked, unless the visual is the backbone of the section.
+
+### Scope and structure constraints still apply
+
+- You may add **new paragraphs** inside an existing section if it improves clarity and the author explicitly agrees.
+- You must **not add/remove/reorder top-level sections**. If the author wants a new section, stop and go back to Prompt 4 (structure changed).
+
+### When to write the file
+
+In interactive mode, you may do all planning in chat first.
+Only **overwrite `structure.md`** once the author confirms the full article structure is ready to persist.
+
+---
+
 ## Section expansion rules
 
 For **every section** in `structure.md` (including Introduction and Conclusion), expand it using the following schema.
@@ -108,7 +171,8 @@ If the article is about concurrency correctness, the examples section must inclu
   - Before / after
   - SQL
 
-Do NOT paste large code yet. Only specify **exactly what** will be shown and **why**.
+Default: avoid large code pastes. Specify **exactly what** will be shown and **why**.
+If the author explicitly requests it, you MUST include the **final squeezed excerpt** inline as a fenced code block (keep it within the size guidance).
 
 For each planned code block, include:
 - Block ID: `CB1`, `CB2`, ...
@@ -119,6 +183,9 @@ For each planned code block, include:
 - What misconception this block corrects (1 bullet)
 - What invariant this block protects (1 bullet)
 - What you will say immediately after the block (bullet beats; no prose)
+
+If the author requested “real code in the structure”, also include:
+- **Code excerpt (final)**: the exact excerpt to use in the article, as a fenced code block (no imports; no unrelated surrounding code).
 
 ### 5. Visuals / figures
 - Type of visual (diagram, chart, table, screenshot)
@@ -155,6 +222,10 @@ In addition to the standard schema, the **Introduction** must explicitly define:
 - Why this problem matters **now**
 - Implicit promise of what the reader will understand by the end
 - Confirm the chosen title/hook/CTA (do not change them; only refine the supporting content plan)
+  - If Prompt 4 stored a hook as **beat structure** (because the user wants final hook prose written in Prompt 6), then Prompt 5 must:
+    - keep that hook schema exactly as-is (no rewording, no reordering, no additions/removals)
+    - do not expand it; simply carry it forward unchanged
+    - treat it as a locked contract that Prompt 6 will translate into prose
 
 ---
 

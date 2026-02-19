@@ -51,8 +51,29 @@ If any are missing or inconsistent, ask up to 4 clarification questions and stop
 - Keep paragraphs short; prefer concrete details over abstractions.
 - When explaining concurrency, make the interleaving explicit (Request A / Request B) and keep state values visible.
 
+---
+
+## Interactive workflow (OPTIONAL but supported)
+
+If the author asks to write the article **section-by-section**, follow this workflow:
+
+1. Draft **one section at a time** (including its planned code blocks/figures).
+2. Pause and ask the author to confirm/adjust that section before continuing.
+3. After a section is approved, **persist progress** by overwriting `article.md` with the full draft so far (title + any completed sections).
+4. Continue to the next section until the full article is complete.
+
+Constraints still apply:
+- Do not change section ordering from `structure.md`.
+- Do not drift scope.
+- Do not invent code or facts; use `ref/` + `context.md`.
+- Use only the code blocks planned in `structure.md`, squeezed to load-bearing excerpts.
+
+If `structure.md` stored the hook as a **beat schema** (instead of final prose), translate it into a final hook in the article while preserving:
+- the beat order
+- the intended meaning
+- any verbatim text the author marked as locked
+
 ## Output rule (MANDATORY)
 
 The final answer must be **only** the contents of `article.md` in Markdown.
 No explanations, no commentary, no extra text.
-

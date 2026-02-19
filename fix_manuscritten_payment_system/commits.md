@@ -21,7 +21,7 @@ e388fe9 Fixed linter
 55eb717 Created and SKIP_ADDRESS_VALIDATION to avoid calling the google validatior. We run it during performance tests because the random generator sometimes generates addresses that belong to a country and the validator fixes. That changes our expected results and so the performance test fails.
 650f1eb created new ci for feature branches
 a867b8f (origin/create-ci-pipeline-for-feature-branches, create-ci-pipeline-for-feature-branches) created a build:web-ci that runs without need of env vars
-35d40ed (origin/staging, staging) Merge pull request #52 from javierMorales9/create-ci-pipeline-for-feature-branches
+35d40ed (staging) Merge pull request #52 from javierMorales9/create-ci-pipeline-for-feature-branches
 c2b8642 Tested that the create and deletion of cards of all types of campaigns doesn't cause credits issues
 8f53f3a Created a new dev only endpoint for creating purchases. Will be used for k6 simulations
 097fc54 Added docs fro the credits lifecycle
