@@ -426,7 +426,7 @@ async findForUpdate(id: string) {
   - For visibility, enable `log_lock_waits` so long waits are logged by Postgres.
   - Once timeouts turn “waiting” into errors, retries become the application-level escape hatch (handled explicitly elsewhere).
 
-#### Paragraph 5 — Why it works (tie to invariants)
+#### Paragraph 5 — Coverage + deadlocks (the real footguns)
 - What this paragraph is about:
   - Row locks only work as a system if every credits-moving action follows the same locking contract — including actions that “give credits back”.
 
@@ -904,6 +904,13 @@ RETURNING balance;
   - decrements
   - returns the new remaining (or a failure)
 - If the bucket is insufficient, you either refill and retry, or fall back to owed/reject depending on product rules.
+- Why Redis helps with concurrency (make it explicit in the article):
+  - Redis executes commands sequentially per shard, so single operations like `DECRBY` or a Lua script are atomic from the application point of view.
+  - This avoids “two app servers spend the same tokens” races on the bucket key.
+- Performance note (keep it high level, no fake precision):
+  - Redis in-memory counter ops are typically sub-millisecond.
+  - Postgres balance mutations are typically milliseconds and get worse under contention.
+  - The point is the shape (tight atomic op vs heavier transactional work), not the exact benchmark.
 
 ```lua
 -- KEYS[1] = bucket key (e.g. "credits:company:<id>:bucket")
@@ -927,6 +934,12 @@ end
   - renew while active
   - reclaim unused credits when the lease expires
 - Redis TTL can help with liveness, but reclaim/refund must be anchored in the DB (or a durable log).
+- Add the other classic failure (must be explained in the article):
+  - you spend from Redis, but the request fails before the card is persisted in Postgres.
+  - without compensation, you “spent credits for a card that does not exist”.
+  - patterns to cover:
+    - refund in request path on failure (and then explain the crash window),
+    - or durable spend log + reconciliation job (idempotency key per spend).
 
 #### Paragraph 5 — Ledger / durable log (required)
 - Once spending happens in memory/Redis, crashes become money bugs unless you can reconstruct what was consumed.

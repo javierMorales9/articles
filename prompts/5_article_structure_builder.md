@@ -66,6 +66,101 @@ If something feels missing, it must be flagged explicitly instead of being silen
 
 ---
 
+## Patterns to encode (with examples)
+
+These patterns make Prompt 5 outputs more execution-ready and reduce “hidden editorial decisions”.
+Apply them whenever applicable.
+
+### Pattern 1 — Change protocol + consistency sync (when structure changes)
+
+If the author explicitly requests a structure change (add/remove/reorder/merge/split), do it — but do it *safely*:
+
+- **Allowed only when explicit**: do not silently add sections/options.
+- **After any change**, run a short **consistency sync** over the whole `structure.md`:
+  - hook/menu matches the final list (count + order + naming)
+  - scope boundary matches the final list (in/out)
+  - section/option numbering is consistent
+  - transitions still point to the correct next section
+  - no leftover TODOs
+
+✅ Good examples:
+- (Concurrency options post) Author adds a new approach (e.g., token bucket/chunk leasing) → update hook menu from “five approaches” to “six approaches”, update scope list, renumber options, update transitions.
+- (API rewrite post) Author decides to merge “Migration plan” + “Rollout” into one section → update the section skeleton + transitions so later references don’t point to removed headings.
+- (Incident post) Author reorders sections to start with “symptoms” before “root cause” → update the intro promise and any “later we’ll…” open loops to match the new order.
+
+❌ Bad examples:
+- Adding a new section because it “feels missing” without asking (structure drift).
+- Reordering sections but leaving the hook/menu unchanged (reader promise mismatch).
+- Renumbering sections but leaving “Transition to Option 3” pointing to the old section.
+
+### Pattern 2 — Yardstick-as-contract (reusable scenario + rubric)
+
+For comparison-heavy posts, define one “yardstick” early and reuse it everywhere:
+
+- **Yardstick**: 1–2 concrete micro-scenarios with fixed numbers/states.
+- **Rubric**: a small, stable set of evaluation criteria (what “wins” means).
+- Every option/section must explicitly “run” the same yardstick (even briefly) so comparisons are apples-to-apples.
+
+✅ Good examples:
+- (Concurrency options post) Same two-request scenario + fixed credit cost reused across row locks, atomic updates, serializable, queue, etc.
+- (Caching strategies post) Same endpoint + same traffic pattern reused across “cache-aside”, “write-through”, “stale-while-revalidate”.
+- (Search indexing post) Same query workload reused across “sync indexing”, “async indexing”, “dual write + backfill”.
+
+❌ Bad examples:
+- Changing the example halfway through (“different endpoint, different rules”) so the reader can’t compare outcomes.
+- Introducing a rubric late, after the reader already formed an opinion.
+
+### Pattern 3 — Evidence blocks are first-class artifacts (what to paste + how to interpret)
+
+If you have benchmarks, logs, screenshots, diffs, or query output, treat them as explicit structure artifacts:
+
+- Include the **exact pasteable block** (or the squeezed excerpt).
+- Attach **interpretation beats**:
+  - what this evidence demonstrates
+  - what it does *not* prove
+  - how it changes the decision
+
+✅ Good examples:
+- (Concurrency options post) Include k6 summary for “row locks” and for “atomic reservation”, then add 2 bullets: “what changed” and “why that matters”.
+- (Frontend perf post) Include Lighthouse before/after + 2 bullets: “primary bottleneck moved from X to Y”.
+- (Reliability post) Include the error-rate graph snapshot + 2 bullets: “why this confirms the hypothesis”.
+
+❌ Bad examples:
+- Dropping a huge raw output block without saying what the reader should notice.
+- Using evidence as decoration (“look at these numbers”) without connecting it to the rubric.
+
+### Pattern 4 — Decision contract (production rule: every code path must comply)
+
+When the post introduces a correctness/architecture contract, specify it as a reusable rule:
+
+- A short “contract checklist” (what *must* happen every time).
+- At least one “other endpoint” example that would break correctness if it didn’t follow the same contract.
+
+✅ Good examples:
+- (Concurrency options post) If “create card” locks/reserves credits, then “delete card” (refund/restores credits) must lock/reserve the same way.
+- (Idempotency post) If “charge” uses idempotency key, then “refund” and “retry webhook handler” must use it too.
+- (Multi-tenant post) If every query must filter by `tenant_id`, show a “background job” path that is often forgotten.
+
+❌ Bad examples:
+- Only showing the contract in one happy-path endpoint, ignoring other mutations that touch the same invariant.
+
+### Pattern 5 — References as planned insertions (don’t “dump links”)
+
+If you include references:
+
+- Store URLs as fenced code blocks (so they’re easy to copy).
+- For each reference, add a short note: **where it will be cited** (which section/paragraph) and **what claim it supports**.
+
+✅ Good examples:
+- (Concurrency options post) A reference about atomic SQL operations is attached to the “atomic reservation” section, supporting “single-statement updates reduce roundtrips”.
+- (Distributed systems post) A reference about transactional outbox is attached to the “event emission reliability” paragraph.
+- (Postmortem post) A vendor status page link is attached to the “external dependency” timeline beat.
+
+❌ Bad examples:
+- A “Further reading” link list with no indication of what each link is for.
+
+---
+
 ## Interactive workflow (OPTIONAL but supported)
 
 If the author asks to do Prompt 5 **section-by-section**, follow this workflow:
