@@ -6,9 +6,10 @@ This repository is the home for **blog article series**. Treat every project as 
 Articles usually explain technical work that has already been done in another codebase. To make that workflow reliable, each series keeps a **stable snapshot** of the relevant product/code repo under `ref/`, plus a `commits.md` file describing the commit range that matters for the story.
 
 For the full operating procedure, read `workflow.md`.
+For editorial drafting and article-shaping rules, read `writing_rules.md`.
 
 ## Language
-- All repository files must be written in English, including `research.md`, `posts.md`, `draft.md`, and the final `article.md`.
+- All repository files must be written in English, including `research.md`, `series.md`, `draft.md`, and the final `article.md`.
 - Conversation with the user may happen in Spanish, but persisted article material and workflow files stay in English.
 
 ## Folder Structure
@@ -17,7 +18,7 @@ Follow the structure defined in `README.md` and `workflow.md`:
 - Each series folder must contain `ref/` and `commits.md` before article work starts.
 - `ref/` is a snapshot of the repo/worktree that contains the completed technical work, typically pinned to the last relevant commit.
 - `commits.md` describes the commit range to review.
-- Series-level analysis and planning live in `research.md` and `posts.md`.
+- Series-level analysis and planning live in `research.md` and `series.md`.
 - Each article lives in its own `postN/` folder.
 
 Example series layout:
@@ -26,7 +27,7 @@ payment-series/
   ref/
   commits.md
   research.md
-  posts.md
+  series.md
   post1/
     schema_ref.png
     draft.md
@@ -68,23 +69,23 @@ When starting or resuming work on a series:
 2. Check whether `ref/` and `commits.md` exist.
 3. If either is missing, stop and tell the user to run `article-linker` before article work begins.
 4. Read `commits.md`.
-5. Inspect existing workflow files: `research.md`, `posts.md`, `post*/draft.md`, and `post*/article.md`.
+5. Inspect existing workflow files: `research.md`, `series.md`, `post*/draft.md`, and `post*/article.md`.
 6. Infer the current phase from the filesystem, not from chat history alone.
 7. Briefly report the detected series, phase, and next action before making substantial edits.
 
 ## Phase Detection
 - Missing `ref/` or `commits.md`: the series is not prepared. Ask the user to run `article-linker`.
 - `ref/` and `commits.md` exist, but `research.md` does not: perform code and commit research, then write `research.md`.
-- `research.md` exists, but `posts.md` does not: discuss the series breakdown with the user, then write `posts.md` once agreed.
-- `posts.md` exists, but the next post has no schema or draft: ask for the post schema or wait for instructions.
+- `research.md` exists, but `series.md` does not: discuss the series breakdown with the user, then write `series.md` once agreed.
+- `series.md` exists, but the next post has no schema or draft: ask for the post schema or wait for instructions.
 - A schema or detailed outline exists, but `draft.md` does not: convert the schema into `draft.md`.
 - `draft.md` exists, but `article.md` does not: revise the draft with the user until they approve final writing.
 - The user explicitly asks for final prose: write `article.md`.
-- `article.md` exists: treat that post as written and move to the next post in `posts.md`, if any.
+- `article.md` exists: treat that post as written and move to the next post in `series.md`, if any.
 
 ## Workflow Boundaries
 - `research.md` contains facts from the codebase, commit range, domain model, tests, and implementation decisions.
-- `posts.md` contains the agreed series structure and the purpose of each article.
+- `series.md` contains the agreed series structure and the purpose of each article.
 - `draft.md` contains the detailed article outline, examples, diagrams, code snippets, and section-level notes.
 - `article.md` contains the publishable final article.
 - Do not jump from research directly to final prose unless the user explicitly asks for that.

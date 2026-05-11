@@ -19,7 +19,7 @@ article-series-name/
   ref/
   commits.md
   research.md
-  posts.md
+  series.md
   post1/
     schema_ref.png
     draft.md
@@ -51,7 +51,7 @@ Whenever Codex starts work on a series, it should:
 1. Identify the series folder.
 2. Verify that `ref/` and `commits.md` exist.
 3. Read `commits.md`.
-4. Inspect `research.md`, `posts.md`, and all `post*/draft.md` and `post*/article.md` files.
+4. Inspect `research.md`, `series.md`, and all `post*/draft.md` and `post*/article.md` files.
 5. Infer the current phase from the filesystem.
 6. Report the detected phase and proposed next action.
 7. Continue from that point.
@@ -62,7 +62,7 @@ Example status report:
 
 ```text
 I found the `fix_manuscritten_payment_system` series.
-It has `ref/`, `commits.md`, `research.md`, and `posts.md`. `post1/draft.md` exists but `post1/article.md` does not, so the current phase is draft review or final article writing for post 1.
+It has `ref/`, `commits.md`, `research.md`, and `series.md`. `post1/draft.md` exists but `post1/article.md` does not, so the current phase is draft review or final article writing for post 1.
 ```
 
 ## Phase Detection
@@ -101,21 +101,21 @@ Action:
 Signals:
 
 - `research.md` exists.
-- `posts.md` does not exist.
+- `series.md` does not exist.
 
 Action:
 
 - Discuss the series structure with the user.
 - Prefer one article per focused idea.
-- Once agreed, write `posts.md`.
+- Once agreed, write `series.md`.
 
-`posts.md` should include the number of posts and what each one will cover.
+`series.md` should include a brief summary of the series, the number of posts, and what each one will cover.
 
 ### 3. Post Schema Pending
 
 Signals:
 
-- `posts.md` exists.
+- `series.md` exists.
 - The next post does not have `draft.md`.
 - The user has not provided a schema, outline, mind map image, or section notes.
 
@@ -181,7 +181,7 @@ Signals:
 Action:
 
 - Treat the post as written.
-- Compare against `posts.md` to identify the next post, if any.
+- Compare against `series.md` to identify the next post, if any.
 - If all planned posts have `article.md`, the series is complete unless the user asks for revisions.
 
 ## File Responsibilities
@@ -203,10 +203,11 @@ Stores technical research for the series:
 
 This file is not an article outline.
 
-### `posts.md`
+### `series.md`
 
 Stores the agreed editorial structure:
 
+- Brief summary of the series.
 - Number of posts.
 - Working title or theme for each post.
 - What each post includes.
@@ -256,12 +257,16 @@ When researching a series:
 
 The output should help future writing sessions resume without repeating the same code archaeology.
 
+## Editorial Rules
+
+When turning schemas, outlines, or drafts into article material, also follow `writing_rules.md`.
+
 ## Resume Rules
 
 Codex should always resume from the latest durable artifact:
 
 - No `research.md`: do research.
-- No `posts.md`: plan the series.
+- No `series.md`: plan the series.
 - No `draft.md` for the current post: wait for or process the schema.
 - `draft.md` exists but no `article.md`: continue draft review or write final prose if requested.
 - `article.md` exists: move to the next post or revise the article if requested.
