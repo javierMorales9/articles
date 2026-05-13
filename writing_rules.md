@@ -55,3 +55,42 @@ For billing, reliability, performance, or operational stories, translate technic
 - size of the mismatch.
 
 Approximate numbers are acceptable in drafts when clearly marked as approximate.
+
+## Introduce Situations With Enough Detail
+
+Do not introduce an important situation with a single compressed sentence if the reader needs more context to picture it.
+
+This is especially important when the same situation will be developed a few paragraphs later. A vague early mention creates confusion: the reader sees a phrase, cannot imagine it clearly, moves on, and then has to reconnect it later when the article finally gives the missing details.
+
+Bad shape:
+
+```text
+About a week after launching the Manuscritten API, one of our best customers sent a large batch through it.
+
+The API looked fine.
+```
+
+Why it fails:
+
+- "sent a large batch through it" is too compressed;
+- the reader does not yet know what the API was for;
+- the batch matters, but the concrete details arrive later;
+- by the time "The API looked fine" appears, the reader may not remember what event is being inspected.
+
+Better shape:
+
+```text
+About a week before everything broke, we had launched the Manuscritten API.
+
+That API was supposed to remove a very annoying step from our customers' workflow.
+
+Until then, many customers had to upload CSVs when they wanted to create a batch of handwritten letters. The API would let them do it directly from their own applications: CRM workflows, ecommerce automations, internal tools, whatever already had the customer data.
+
+That was the promise: connect Manuscritten once, then send handwritten letters from the tools they were already using.
+
+Then one of our best customers used it for real.
+
+The API looked fine.
+```
+
+Rule of thumb: if a concept needs detail to be understood, either provide the detail immediately or delay the concept until the article is ready to explain it. Do not strand it in a throwaway sentence.
