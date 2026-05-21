@@ -7,6 +7,7 @@ Articles usually explain technical work that has already been done in another co
 
 For the full operating procedure, read `workflow.md`.
 For editorial drafting and article-shaping rules, read `writing_rules.md`.
+For post header image generation, read `header_image.md`.
 
 ## Language
 - All repository files must be written in English, including `research.md`, `series.md`, `draft.md`, and the final `article.md`.
@@ -32,9 +33,11 @@ payment-series/
     schema_ref.png
     draft.md
     article.md
+    header_image.png
   post2/
     draft.md
     article.md
+    header_image.png
 ```
 
 ## Linking A Repo/Worktree
@@ -88,6 +91,7 @@ When starting or resuming work on a series:
 - `series.md` contains the agreed series structure and the purpose of each article.
 - `draft.md` contains the detailed article outline, examples, diagrams, code snippets, and section-level notes.
 - `article.md` contains the publishable final article.
+- `header_image.png` contains the post header image, created after `article.md` using `header_image.md`.
 - Do not jump from research directly to final prose unless the user explicitly asks for that.
 - Do not use `final.md` as the final article filename unless the user explicitly requests it; the default final prose file is `article.md`.
 

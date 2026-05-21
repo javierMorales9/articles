@@ -11,11 +11,9 @@ Let's start with the first one.
 
 You are building a reservation flow for your app or ecommerce.
 
-At first it looks simple. A user reserves something, you decrease the available stock, and everyone goes home happy.
+When a user wants to buy a product, you reserve it first by decreasing the available stock. Of course, in a system like this you have to deal with concurrency: how do you avoid race conditions, double reservations, or inconsistent stock when two users try to reserve the same product at the same time?
 
-Then you remember concurrency exists.
-
-Two users can reserve the last item at the same time. Your first solution technically works, but it is slow. Or ugly. Or slow and ugly, which is a beautiful little genre of software.
+Your first solution works, but it serializes too much of the flow. Or it relies on application-level checks that feel too easy to break under load.
 
 So now you are asking yourself questions like:
 
@@ -23,37 +21,29 @@ So now you are asking yourself questions like:
 Should I move the reservation counter to Redis and use INCR or DECRBY?
 Can I do it directly in Postgres?
 Is there a SQL construct that makes this safe?
-Am I overengineering this?
-Am I underengineering this?
-Will future me hate present me?
+What exactly needs to be locked?
+What is the simplest thing that will not break when traffic increases?
 ```
 
 Or maybe you are setting up a Stripe integration.
 
-You thought it was going to be "create checkout session, receive webhook, update user subscription".
+And while developing it, you find out that there are over 258 event types. They all have different amounts of data. The order you get them is not guaranteed. None of them should be trusted. And it is far too easy to have a payment be failed in Stripe and "subscribed" in your app.
 
-Cute.
-
-Now you are staring at race conditions, partial updates, duplicated webhooks, out-of-order events, retries, idempotency keys, and a database state that is technically possible but spiritually cursed.
+And now you are wondering: how do I keep my database consistent while Stripe, my backend, and the user are all doing things at slightly different times?
 
 Or maybe you already have logs.
 
 You did the responsible thing. You installed a logger. You send logs somewhere. You can search them.
 
 And yet, every time a real issue happens, the experience is still:
+- Why did checkout fail for this customer?
+- Why did this API call return 500?
+- Why did this background job retry forever?
+- Why am I grepping like a maniac at 1am?
 
-```text
-Why did checkout fail for this customer?
-Why did this API call return 500?
-Why did this background job retry forever?
-Why am I grepping like a maniac at 1am?
-```
+You know any of these problems are not impossible. Other people have solved it right? 
 
-You know the problem is not impossible.
-
-Other people have solved it.
-
-So you do what you think can get you out of the aporia.
+There must be info about it. So you go do what makes more sense:
 
 You search the internet.
 
@@ -62,9 +52,12 @@ You search the internet.
 And what you find is usually some combination of:
 
 - introductory tutorials for library X;
+- very concrete question in stack overflow that, even though can solve a minor detail, doesn't give you much insight.
 - vendor articles that start as education and somehow end exactly where their product begins;
 - motivational posts about the importance of soft skills, usually reminding us that communicating decisions is more important than technical quality, while giving very little concrete detail about how that communication actually happened, what decision was being communicated, who disagreed, what evidence changed the conversation, or how the tradeoff was resolved;
 - posts about how AI helped someone build an MVP in two weeks, without many details about what the product actually does, which features the MVP includes, how the hard parts were handled, or what happened after the demo started touching reality.
+
+None of this solves your problem.
 
 So you ask the AI.
 
@@ -74,7 +67,7 @@ A little bit of vendor pitch. A little bit of introductory tutorial. A little bi
 
 To be clear, AI is better than generic SEO content.
 
-It can look at your code. It can adapt the answer to your case. It can help you understand unfamiliar APIs. It can give you a decent first pass when you are stuck.
+It can look at your code and adapt the answer to your case. And it is certainly good to describe how unfamiliar APIs work. At least for a decent first pass when you are stuck.
 
 But I often find it is not the greatest tool for developing the judgment required to know whether what it is telling you is good.
 
@@ -86,28 +79,7 @@ What I really want in those moments is expert advice.
 
 Not necessarily a universal answer. Not a "best practice" carved into stone tablets. Just the kind of advice you would get if you had someone on your team who had spent ten years dealing with that specific topic.
 
-Someone who could tell you:
-
-```text
-I had a problem like yours.
-Here is how I noticed it.
-Here are the options I considered.
-Here is what I expected to be true.
-Here is what turned out to be false.
-Here is what was overkill.
-Here is what was surprisingly enough.
-Here is the solution I chose.
-Here is what broke anyway.
-Here is what I would do differently.
-```
-
-When I was dealing with the three problems I mentioned at the start, reservation concurrency, Stripe integration, and logging, I wanted to find posts like [this one about atomic operations in SQL](https://blog.pjam.me/posts/atomic-operations-in-sql/), [this Stripe recommendations repo](https://github.com/t3dotgg/stripe-recommendations), and [this essay on why logging sucks](https://loggingsucks.com/).
-
-That is the kind of writing I like.
-
-Specific. Opinionated. Shaped by reality. Full of scars, but ideally still readable before midnight.
-
-I want more writing that feels like this:
+Something like:
 
 ```text
 Hi, I am John Doe, CTO of a startup I founded five years ago.
@@ -120,27 +92,23 @@ Here is what broke.
 Here is what I would do differently.
 ```
 
-That is what this website is about.
+When I was dealing with the three problems I mentioned at the start, reservation concurrency, Stripe integration, and logging, I wanted to find posts like [this one about atomic operations in SQL](https://blog.pjam.me/posts/atomic-operations-in-sql/), [this Stripe recommendations repo](https://github.com/t3dotgg/stripe-recommendations), and [this essay on why logging sucks](https://loggingsucks.com/).
 
-Concrete software work.
-
-Features I built. Technologies I deployed to production. Bugs I caused. Bugs I found. Systems that were too slow. Systems that were too clever. Systems that worked, but only after taking a weird route through confusion.
+That is the kind of writing I like.
 
 ## Wait, Who Are You?
 
 Now, the skeptical reader might be asking:
 
 ```text
-And let me guess.
-You are one of those altruistic experts sharing your infinite knowledge
-with the poor and helpless?
+And let me guess. You are one of those altruistic experts sharing your infinite knowledge with the poor and helpless?
 
 To begin with, who the hell are you?
 ```
 
 Fair.
 
-I am Javi.
+I am Javier Morales.
 
 I have been working professionally as a full-stack developer for five years. I wrote my first line of code around twelve years ago. For the last four years I have also been building digital products and startups by myself.
 
@@ -158,11 +126,9 @@ Who knows. It depends on who you ask. But probably not either.
 
 So why write these posts?
 
-Because I have a hard time finding people describing how they solved the problems I am facing.
+Because I have a hard time finding people describing how they solved the problems I am facing and I would like to help those people that are currently asking themselves the same questions I was asking myself 6 months ago.
 
 And since the real experts apparently do not want to write, I guess I will have to do it.
-
-Also, because the version of me from five years ago would have saved hundreds of hours banging his head against the wall if he had found more posts like the ones I want to write here.
 
 ## Will These Posts Help Me?
 
@@ -192,36 +158,19 @@ Instead, I want to write about topics many product developers eventually run int
 
 For example: building a dashboard that shows customers how they are using your API.
 
-That is a common product need. If you build an API and customers depend on it, sooner or later someone will want to know:
+That is a common product need. If you build an API and customers depend on it, sooner or later someone will want to build a dashboard for it.
 
-```text
-How many requests did we send?
-Which endpoint failed?
-What did we spend?
-Which integration is noisy?
-Can I export this?
-Can I show it to my boss without opening Datadog?
-```
+And, once I have a topic general enough that multiple people can relate to, I try to be specific enough to be useful. And tell the real way I solved the issue:
 
-An article I would like to write is not "how to build dashboards in React".
+- Here is the dashboard I wanted to create.
+- Here is why I needed a separate table to store API usage events.
+- Here are the indexes I created to retrieve the data fast.
+- Here are the React charting libraries I tested.
+- Here is why I chose the one I chose.
+- Here is the simulator I built to check whether it worked under the traffic we expected.
+- Here is what I would change now.
 
-It would be something more specific:
-
-```text
-Here is the dashboard I wanted to create.
-Here is why I needed a separate table to store API usage events.
-Here are the indexes I created to retrieve the data fast.
-Here are the React charting libraries I tested.
-Here is why I chose the one I chose.
-Here is the simulator I built to check whether it worked under the traffic we expected.
-Here is what I would change now.
-```
-
-That is the balance I am aiming for.
-
-Specific enough to be real.
-
-General enough to be useful.
+That is the balance I am aiming for. You'll have to tell me if it works or not.
 
 ## Okay, I Read A Few Posts And Found Them Useful
 
@@ -235,4 +184,4 @@ That way Substack sends new articles directly to your inbox when I write them, a
 
 If you found these articles interesting and think my experience could be useful at your company, I would be happy to talk.
 
-You can find me on [LinkedIn](TODO_LINKEDIN_URL), or email me at [javiermorales9@gmail.com](mailto:javiermorales9@gmail.com).
+You can find me on [LinkedIn](https://www.linkedin.com/in/javier-morales-de-vera-51a612224/), or email me at [javiermorales9@gmail.com](mailto:javiermorales9@gmail.com).

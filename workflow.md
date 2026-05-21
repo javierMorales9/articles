@@ -24,9 +24,11 @@ article-series-name/
     schema_ref.png
     draft.md
     article.md
+    header_image.png
   post2/
     draft.md
     article.md
+    header_image.png
 ```
 
 Only `ref/` and `commits.md` are required before writing begins. The rest are produced as the workflow progresses.
@@ -260,6 +262,10 @@ The output should help future writing sessions resume without repeating the same
 ## Editorial Rules
 
 When turning schemas, outlines, or drafts into article material, also follow `writing_rules.md`.
+
+## Header Images
+
+After a post has `article.md`, use `header_image.md` when the user asks for a visual header. The default output is `postN/header_image.png`, stored beside the post article.
 
 ## Resume Rules
 

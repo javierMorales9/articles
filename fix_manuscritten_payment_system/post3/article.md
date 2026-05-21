@@ -1,231 +1,218 @@
 # How do you choose a concurrency strategy for a credits system (without becoming a database expert)?
 
-In Post 1 we showed the nightmare scenario: two perfectly “successful” operations happening at the same time can make your pay‑per‑use balance wrong without throwing a single error. Then we built a test that reproduces that failure on demand, so it stops being a production ghost. But we didn't propose any solution to the problem. In this post, we’ll compare the main coordination approaches you can use in Postgres and give you a simple way to choose one based on the failure mode you can tolerate.
+In the first article, we saw how a race condition appeared inside our payment system. Two perfectly successful card-creation requests could happen at the same time, both return OK, and still leave the company’s credit balance wrong.
 
-We’ll start with the simplest fixes inside Postgres (make requests wait with a lock, make the update atomic, or let Postgres abort/retry conflicts). Then we’ll look at “bigger guns” when one company becomes a hotspot: spending from a fast shared counter like Redis, or going all the way to a single-writer/queue so each company’s credits are processed in order.
+In the second article, we made the bug reproducible. We built a k6 test that simulated concurrent card creation, hammered the endpoint, and proved that the accounting state could drift under load.
 
-Note: This post is Postgres-specific, because locking and isolation details (and even the best “who’s blocking who” queries) differ across databases.
+This article is about different ways we could solve that problem specifically in Postgres.
 
-But before we compare anything, let me set one small example we’ll reuse for every option so you can feel the difference in behavior, not just read theory.
+That is different from the previous two articles. Those were mostly about the bug itself: how it appeared, why the code looked reasonable, and how we reproduced it. This one is more database-specific on purpose. Why? Because we use Postgres, and because concurrency control is one of those topics where a generic answer often becomes too vague to help anyone. The useful question is not “how do databases solve races?” It is “given this endpoint and this database, what tools do we actually have?”
 
-## The yardstick
+We will look at four Postgres options:
 
-In the previous post, I explained how I ran into these problems at my startup, Manuscritten. I’ll use it as the running example for this article, since it’s what I know best. The ideas described here apply to any prepaid-credit system that tries to maintain an updated balance.
+1) Row-level locks.
+2) Advisory locks.
+3) Atomic updates.
+4) Serializable transactions.
 
-Manuscritten helps companies send personalized handwritten letters and postcards to their customers as a marketing channel. For example: when an ecommerce company wants to thank a VIP customer after their 10th purchase, instead of sending a boring email, they send a premium-looking handwritten letter that feels like it was written by a human.
+But before comparing them, let’s take a step back and think about the shape of the problem.
 
-We call each item that gets sent a “card”. Each card has a cost in our credits system depending on the recipient address and design.
+Our endpoint works fine when there is only one card-creation request for a company. It fails when multiple requests for the same company overlap. We saw why in the first article: each request reads the same balance, computes a new balance in application memory, and later writes that computed value back.
 
-When a company (the ecommerce company in the previous example) wants to send cards, it first has to pre-purchase credits, which are added to the `availableCredits` balance. From that point forward, every new card will try to spend credits from that balance. For example: if a company has 100 `availableCredits` and a new card costs 7 credits, the resulting balance is 93.
+So if we want to fix the race condition, we need the endpoint to behave as if there were only one request for that company at the critical moment, even when there are many. We need to isolate each request from the others while it makes the credit decision.
 
-At some point, the company might run out of credits. In that case, new incoming cards get marked as owed and, instead of decreasing `availableCredits` below zero, we increase another balance: `dueCredits`. For example: if the company has 3 `availableCredits` and a card that costs 7 credits arrives, instead of setting `availableCredits` to -4 we keep `availableCredits` at 3 and increase `dueCredits` by 7.
+Thankfully, Postgres gives us several tools to deal with isolation.
 
-So the resulting domain looks like this:
+## Postgres is already using locks
 
-```ts
-export enum PaymentStatus {
-  CHARGED = "charged",
-  OWED = "owed",
-}
+Postgres works in transactions. When you explicitly write `BEGIN` and `COMMIT`, you create a transaction yourself. When you run a single SQL statement without an explicit transaction, Postgres still runs that statement inside an implicit transaction.
 
-export default class Card {
-  private paymentStatus: PaymentStatus;
-  private price: number;
-  private name: string;
-  private surname: string;
-  private address: string;
-  private zipCode: string;
-  // ... more fields
-}
+That matters because locks live inside transactions.
+
+Postgres is built to handle many concurrent transactions at the same time, so it needs mechanisms to prevent two transactions from corrupting the same data. One of those mechanisms is locking.
+
+Every SQL statement acquires some kind of lock. The exact lock depends on the statement and the object being touched.
+
+A plain `SELECT` takes a table-level `ACCESS SHARE` lock. That prevents disruptive schema changes while the query runs, but it does not block normal writes. So you can make a SELECT that returns a row and an UPDATE that touches that same row at the **same time** without postgres blocking that.
+
+A normal `UPDATE` that does not modify key columns takes two relevant locks:
+
+- a table-level `RowExclusiveLock`, and
+- a row-level `FOR NO KEY UPDATE` lock on each row it updates.
+
+The row-level lock is the part that matters for our bug. What it enforces is that if two transactions try to update the same row at the same time, the second one has to wait. If they update different rows, they can proceed concurrently.
+
+For our endpoint, the interesting conflict is not at the table level. The concurrency happens when two requests try to create cards for the same company row. That means row-level locks are the important part.
+
+A plain SELECT and an UPDATE can overlap on the same row:
+
+```sql
+-- Transaction 1
+BEGIN;
+SELECT available_credits
+FROM company
+WHERE id = 'company_123';
+
+-- Transaction 2 can still update the same row
+UPDATE company
+SET available_credits = available_credits - 7
+WHERE id = 'company_123';
+COMMIT;
 ```
 
+Two updates to different rows can also overlap:
 
-```ts
-export class Company {
-  // ... more fields
-  private availableCredits: number;
-  private dueCredits: number;
-}
+```sql
+-- Transaction 1
+BEGIN;
+UPDATE company
+SET available_credits = available_credits - 7
+WHERE id = 'company_123';
+
+-- Transaction 2 can update another company row at the same time
+UPDATE company
+SET available_credits = available_credits - 7
+WHERE id = 'company_456';
+COMMIT;
 ```
 
-In this domain, there are three invariants that have to be maintained at all costs:
+But two updates to the same row cannot modify it at the same time:
 
-1) Available credits never go below zero.  
-2) Card status matches what happened: charged → available goes down; owed → due goes up. 
-3) The accounting adds up across many cards. For example:
-   - If a company purchased 100 credits and received 3 cards costing 7 credits (all charged), the remaining balances must be `availableCredits = 79` and `dueCredits = 0`.
-   - If one of those cards was owed instead, the balances should reflect that split (e.g., `availableCredits = 86` and `dueCredits = 7`).
+```sql
+-- Transaction 1
+BEGIN;
+UPDATE company
+SET available_credits = available_credits - 7
+WHERE id = 'company_123';
 
-The main problem we’ll solve in this article is how to keep these invariants correct under concurrency. To make the comparison concrete, we’ll start from the naive implementation for the endpoint that creates a card (which fails under concurrency) and keep tweaking it throughout the post:
+-- Transaction 2
+BEGIN;
+UPDATE company
+SET available_credits = available_credits - 7
+WHERE id = 'company_123';
+-- waits until Transaction 1 commits or rolls back
+```
+
+In that last example, the second `UPDATE` conflicts with the first transaction's row-level `FOR NO KEY UPDATE` lock on `company_123`.
+
+Once a transaction acquires a row lock, it keeps that lock until the transaction ends. If a transaction updates the company row and then does five more operations before committing, the row lock is not released after the update statement finishes. It is released after the transaction commits or rolls back.
+
+That can feel annoying when you are staring at a blocked request, but it is central to how Postgres preserves consistency. Under MVCC, other transactions can keep reading older committed versions of rows while a transaction is in progress. The row lock protects the uncommitted write until Postgres knows whether that new version becomes real at commit time or disappears at rollback time.
+
+## Locking is already working in our code
+
+This behavior, of course, applies to our endpoint.
+
+The read-modify-write flow, if you do not remember it, was this:
 
 ```ts
-// Naive controller shape (simplified): validate → build card → (optional) validate → charge → persist
-function createCardController(input: CardInput, ctx: Context, cardRepo: CardRepository, companyRepo: CompanyRepository) {
-  const result = await validateInputAddress(input);
-
-  const card = Card.new({
-    input,
-    companyId: campaign.companyId,
-    //... more data
-  });
-
-  const error = await validateCardAddressWithGoogle(card);
-  if (error) {
-    log.info("Could not validate address", { err: toErrorObject(error) });
-  }
-
-  const company = await companyRepo.find(campaign.companyId);
+await ctx.db.transaction(async (tx) => {
+  const company = await companyRepo.find(tx, companyId);
   if (!company) throw new Error("Company not found");
 
-  chargeCredits(company, card);
-
-  await ctx.db.transaction(tx => {
-    await cardRepo.saveCard(card);
-    await companyRepo.saveWithCredits(company);
+  const card = Card.new({
+    companyId,
+    recipientName: input.name,
+    address: input.address,
+    country: input.country,
   });
-}
-```
 
-```ts
-// Naive repo shape: find + save (no locking contract)
-class CompanyRepo {
-  async find(id: string) {
-    const result = await this.db.query.companies.findFirst({
-      where: eq(companies.id, id),
-    });
-    if (!result) return null;
-    return parseCompany(result);
-  }
-
-  async saveWithCredits(company: Company) {
-    await this.db
-      .update(companies)
-      .values({
-        name: primitives.name,
-        // ... other fields
-        availableCredits: primitives.availableCredits.toString(),
-        dueCredits: primitives.dueCredits.toString(),
-      });
-  }
-}
-```
-
-```ts
-// Yardstick credits mutation for this post: modify the company + card in-place
-function chargeCredits(company: Company, card: Card) {
   const cost = card.getCreditCost();
   const available = company.getAvailableCredits();
 
-  if (available >= cost) {
-    company.setAvailableCredits(available - cost);
-    card.markAsCharged();
-    return;
-  }
+  company.setAvailableCredits(available - cost);
+  card.markAsCharged();
 
-  company.setDueCredits(company.getDueCredits() + cost);
-  card.markAsOwed();
-}
+  await cardRepo.saveCard(tx, card);
+  await companyRepo.saveCompany(tx, company);
+});
 ```
 
-As you can see, this implementation has the read-modify-write problem we discussed in the previous post, so it will end up saving the wrong value in the database under concurrency.
+And in SQL terms:
 
-From now on, we will compare different options and see which one is best for each case: waiting, retries/aborts, or moving the complexity elsewhere.
+```sql
+BEGIN;
 
-Alright. Let’s start with the most straightforward approach: make the second request wait.
+SELECT available_credits
+FROM company
+WHERE id = $company_id;
 
-## Option 1: Row-level locks (`SELECT … FOR UPDATE`)
+-- The application computes:
+-- computed_available_credits = available_credits - card_price
 
-Row-level locking is the simplest contract: before you change a company’s credits (because a card is being created or deleted), you make sure you’re the only request allowed to touch that company’s balance for a moment.
+INSERT INTO card (
+  id,
+  company_id,
+  recipient_name,
+  address,
+  country,
+  price
+) VALUES (
+  $card_id,
+  $company_id,
+  $recipient_name,
+  $address,
+  $country,
+  $card_price
+);
 
-In Postgres, the most direct way to do that is to lock the company row, do the credits work, then commit. If two card creations hit the same company at the same time, one proceeds and the other waits. Concurrency becomes a queue per company.
+UPDATE company
+SET available_credits = $computed_available_credits
+WHERE id = $company_id;
 
-### The mechanism (lock first, then charge, then persist)
-
-The contract is deliberately simple. You can explain it in one minute, and that is the point. When you are debugging a money-like counter under load, you do not want clever. You want obvious.
-
-1) Start a transaction.  
-2) Lock the company row (`SELECT … FOR UPDATE`).  
-3) Compute the card outcome (charged vs owed) based on the *current* balance.  
-4) Persist both the card and the updated company balances.  
-
-Here’s the shape in code:
-
-```ts
-async function saveCardAndChargeCredits() {
-  // ... validate input address, build `card`, load `campaign`, etc. (omitted for brevity)
-
-  await ctx.db.transaction(async (tx) => {
-    companyRepo.setDb(tx);
-    cardRepo.setDb(tx);
-
-    const lockedCompany = await companyRepo.findForUpdate(campaign!.companyId);
-    if (!lockedCompany) throw new Error("Company not found");
-
-    lockedCompany.chargeCard(card, campaign);
-
-    await cardRepo.saveCard(card);
-    await companyRepo.saveWithCredits(lockedCompany);
-  });
-}
+COMMIT;
 ```
 
-```ts
-async findForUpdate(id: string) {
-  const rows = await this.db.execute(sql`
-    SELECT id
-    FROM "company"
-    WHERE id = ${id}
-    FOR UPDATE
-  `);
-  if (!rows.length) return null;
+Now imagine two transactions, `T1` and `T2`, arrive at almost the same time for the same company.
 
-  const result = await this.db.query.companies.findFirst({
-    where: eq(companies.id, id),
-  });
+Both can run the initial `SELECT` and read the same balance, because a plain select does not lock the row against updates. Both can create their card object. Both can compute what they want the company balance to become.
 
-  if (!result) return null;
-  return parseCompany(result);
-}
+Then they reach the `UPDATE`.
+
+If `T1` gets there first, Postgres lets it update the company row and gives it the row lock. When `T2` reaches its own `UPDATE`, Postgres sees that the row is already locked by `T1`, so `T2` waits.
+
+```mermaid
+sequenceDiagram
+    participant T1 as T1
+    participant DB as Postgres
+    participant T2 as T2
+
+    T1->>DB: BEGIN / SELECT company
+    T2->>DB: BEGIN / SELECT company
+    Note over T1,T2: Both requests read the same balance
+    T1->>T1: create card and compute new balance
+    T2->>T2: create card and compute new balance
+    T1->>DB: INSERT card
+    T2->>DB: INSERT card
+    T1->>DB: UPDATE company
+    Note over DB: T1 holds the row lock
+    T2->>DB: UPDATE company
+    Note over T2,DB: T2 waits for T1 to commit
+    T1->>DB: COMMIT
+    DB-->>T2: lock released
+    T2->>DB: UPDATE company with already-computed balance
+    T2->>DB: COMMIT
 ```
 
-Two details matter here:
+This was the second issue we found at the end of the previous post. The inconsistent balance was not the only thing caused by concurrency. We also found that the time to serve a request exploded under load.
 
-- The lock has to be taken **inside the same transaction** that charges credits and writes the result. Otherwise you’re not protecting the critical section.
-- Your repository needs to run on the transaction connection in the ORM (`tx` in this case). Otherwise you can “lock” in one connection and “save” in another, which is like putting a “Reserved” sign on a table… in a different restaurant.
+When I tried to identify what was causing that second issue, I found that many requests were blocked at the database.
 
-### The concurrency “dance” (what actually happens)
+<!-- TODO: Insert the dashboard screenshot showing many blocked requests once the final capture is available. -->
 
-To see how this works internally, assume two card creations arrive at the same time for the same company, and each card costs 7 credits. Let's see how it would behave in two scenarios:
+The waiting time was accumulating across requests.
 
-Scenario A (company has enough prepaid credits):
+Imagine one company is having a busy moment and creates 10 cards per second, one every 100ms. Now suppose the work from the moment a transaction acquires the company row lock until it commits takes 300ms per request. Because only one request can hold the company row lock at a time, we can only process one of those locked sections every 300ms.
 
-1) Request A begins and locks the company row (`FOR UPDATE` succeeds). It sees 100 available, 0 due.  
-2) Request B begins and tries to lock the same row. It blocks and waits.  
-3) A charges the card (100 → 93), marks it charged, writes, and commits. Lock released.  
-4) B unblocks, locks the row, and now sees the updated balance (93 available, 0 due).  
-5) B charges (93 → 86), marks its card charged, writes, commits.  
+The first request arrives at 0s and starts immediately (no wait time). The second arrives at 0.1s, but the lock is still held, so it waits about 200ms until the first one finishes. Suddenly that second request takes around 500ms instead of 300ms.
 
-End state: 86 available, 0 due, both cards charged.
+The third request arrives at 0.2s. It waits about 100ms for the first request to finish, then a full 300ms for the second request to run. Its total time is now roughly 700ms.
 
-Scenario B (company doesn’t have enough prepaid credits for the second card):
+![Waiting accumulates across requests](lock_waiting_accumulates.svg)
 
-1) A locks, sees 10 available, 0 due.  
-2) B blocks on the lock.  
-3) A charges (10 → 3), commits.  
-4) B unblocks, locks, sees 3 available, 0 due.  
-5) B can’t charge 7 from prepaid credits, so it marks the card owed and increases due by 7 (available stays 3).  
+In general, each new request adds about 200ms of backlog, because 300ms of locked work arrives every 100ms. After 10 seconds, 100 requests have been received. At that point, the queue has been accumulating for about 99 * 200ms = 19.8s. So the 100 request will have to wait almost 20 seconds before it can be processed, and then spends its own 300ms doing work. And the block time will keep increasing while the card receiving rate is preserved.
 
-End state: 3 available, 7 due, one charged and one owed.
-
-Notice what the lock is really doing: it’s not “doing math for you”. It’s forcing a clean serial order so each request makes its decision using current state.
-
-### Seeing it in Postgres (so it’s not a black box)
-
-If you are going to pick waiting as your failure mode, you need to be able to observe it. Otherwise the first time you notice lock contention is when customers tell you the app feels slow.
-
-The source of truth here is Postgres itself. `pg_stat_activity` shows the sessions currently connected to the database (including the SQL they’re running), and `pg_blocking_pids(pid)` tells you which backend PIDs are blocking a given session.
-
-This query joins both to answer the practical question: “who is blocked by who?”
+This is how waiting becomes an outage. Tail latency climbs, clients time out, retries add load, and the queue feeds itself.
 
 ```sql
 SELECT
@@ -243,26 +230,134 @@ Hypothetical output when three concurrent card creates hit the same company:
 
 | blocked_pid | blocked_query                                    | blocking_pid | blocking_query |
 |------------|---------------------------------------------------|--------------|----------------|
-| 7002       | SELECT id FROM "company" WHERE id = $1 FOR UPDATE | 7001         | COMMIT         |
-| 7003       | SELECT id FROM "company" WHERE id = $1 FOR UPDATE | 7001         | COMMIT         |
+| 7002       | UPDATE "company" SET available_credits = $1 ...   | 7001         | COMMIT         |
+| 7003       | UPDATE "company" SET available_credits = $1 ...   | 7001         | COMMIT         |
 
-`blocked_pid` is the session that is waiting. `blocking_pid` is the one currently holding the lock. The `*_query` columns show what each side is doing. In this example, PIDs 7002 and 7003 are stuck at the `FOR UPDATE`, while 7001 is the one in front of the line.
+`blocked_pid` is the session that is waiting. `blocking_pid` is the one currently holding the lock. In this example, PIDs 7002 and 7003 are waiting to update the company row while 7001 is the transaction in front of the line.
 
-This is also where production settings matter.
-
-By default, a blocked query can wait indefinitely. In a real product, you typically want an upper bound. In Postgres you have three knobs that matter here:
+By default, a blocked query can wait indefinitely. In a real product, you usually want upper bounds:
 
 - `lock_timeout`: how long a statement is allowed to wait to acquire a lock before Postgres errors.
-- `statement_timeout`: how long a statement is allowed to run in total. This is a backstop for slow queries even when locks are not the only issue.
-- `log_lock_waits`: logs lock waits that exceed a threshold so you can correlate slow requests with lock contention.
+- `statement_timeout`: how long a statement is allowed to run in total.
+- `log_lock_waits`: whether Postgres logs lock waits that exceed a threshold.
 
-Where to set them depends on how strict you want to be:
+You can set these globally, per role, per database, or inside a transaction with `SET LOCAL`. For user-facing APIs, I usually want a bounded wait rather than a request that can silently hang forever.
 
-- Globally in `postgresql.conf` (or via managed-DB parameter groups) if you want a consistent default.
-- Per role or database with `ALTER ROLE ... SET ...` or `ALTER DATABASE ... SET ...` if only some workloads should be constrained.
-- Per transaction with `SET LOCAL lock_timeout = '...'` if only the credits-critical section should be bounded.
+## If locking is already working, why is our code failing?
 
-Reasonable starting values are workload-dependent, but for user-facing APIs I usually start with something like a few hundred milliseconds to a couple seconds for `lock_timeout`, and then tune based on p95 and the failure mode I prefer. The downside of setting timeouts too aggressively is that you trade waiting for errors, and errors tend to trigger retries, which can amplify load if you are not careful.
+One could ask: concurrency issues are solved by locking, right? If Postgres is already locking the company row during the update, why do we still have a race condition?
+
+Because we are locking too late.
+
+By the time our transaction reaches the UPDATE, the application has already read the old balance, created the card, and computed the value it wants to write. While the second transaction is waiting for the row lock, the first transaction can commit a new balance. But the second transaction does not automatically recompute its decision after the wait. It just writes the value it computed earlier.
+
+The lock protects the physical update from happening at the exact same instant. It does not protect the earlier decision that produced the stale value.
+
+So the first way to solve the issue is conceptually simple: move the lock before the read.
+
+That is row-level locking. But before we zoom into it, it is worth naming the tradeoff space.
+
+## The shape of the options
+
+All four Postgres solutions are trying to answer the same question: what should happen when two requests want to change the same company balance at the same time?
+
+They do not all answer it the same way.
+
+Row-level locks say: one request goes first, and the other waits. The tradeoff is simple correctness at the cost of queueing under contention.
+
+Advisory locks say almost the same thing, but with a mutex key we choose instead of a physical row. The tradeoff is flexibility at the cost of discipline: every code path has to remember to take the same logical lock.
+
+Atomic updates say: let Postgres do the read-modify-write in one statement. The request may still wait on the row, but the locked section is much smaller because the decision and the update happen inside the database.
+
+Serializable transactions say: let requests run, and if Postgres detects that the result would not be equivalent to a clean serial order, abort one transaction. The tradeoff is that correctness comes with retries.
+
+So the options are not just different implementations. They are different failure modes:
+
+- Row-level locks and advisory locks mostly fail by waiting.
+- Atomic updates still wait, but try to make the wait tiny.
+- Serializable transactions fail by aborting and making you retry.
+
+Let’s now go with the first one.
+
+## Option 1: Row-level locks (`SELECT … FOR UPDATE`)
+
+Row-level locking is the simplest contract: before you change a company’s credits (because a card is being created or deleted), you make sure you’re the only request allowed to touch that company’s balance for a moment.
+
+In Postgres, the most direct way to do that is to lock the company row, do the credits work, then commit. If two card creations hit the same company at the same time, one proceeds and the other waits. Concurrency becomes a queue per company.
+
+### The mechanism (lock first, then charge, then persist)
+
+With row level lock in place the endpoint basically looks the same as it did before except that now we move the lock to the SELECT:
+
+1) Start a transaction.  
+2) Lock the company row (`SELECT … FOR UPDATE`).  
+3) Compute the new balance from the *current* balance.
+4) Persist both the card and the updated company balance.
+
+Here’s the shape in code:
+
+```ts
+async function saveCardAndChargeCredits() {
+  await ctx.db.transaction(async (tx) => {
+    const company = await companyRepo.findForUpdate(tx, companyId);
+    if (!company) throw new Error("Company not found");
+
+    const card = Card.new({
+      companyId,
+      recipientName: input.name,
+      address: input.address,
+      country: input.country,
+    });
+
+    const cost = card.getCreditCost();
+    const available = company.getAvailableCredits();
+
+    company.setAvailableCredits(available - cost);
+    card.markAsCharged();
+
+    await cardRepo.saveCard(tx, card);
+    await companyRepo.saveCompany(tx, company);
+  });
+}
+```
+
+```ts
+async findForUpdate(tx: DbTransaction, id: string) {
+  const rows = await tx.execute(sql`
+    SELECT id
+    FROM "company"
+    WHERE id = ${id}
+    FOR UPDATE
+  `);
+  if (!rows.length) return null;
+
+  const result = await tx.query.companies.findFirst({
+    where: eq(companies.id, id),
+  });
+
+  if (!result) return null;
+  return parseCompany(result);
+}
+```
+
+Two details matter here:
+
+- The lock has to be taken **inside the same transaction** that charges credits and writes the result. Otherwise you’re not protecting the critical section.
+- Your repository needs to run on the transaction connection in the ORM (`tx` in this case). Otherwise you can “lock” in one connection and “save” in another, which is like putting a “Reserved” sign on a table… in a different restaurant.
+
+### The concurrency “dance” (what actually happens)
+
+To see how this works internally, assume two card creations arrive at the same time for the same company, and each card costs 7 credits.
+
+1) Request A begins and runs `SELECT ... FOR UPDATE`. Postgres gives A the row lock, and only then does A get the company balance back. It sees 100 available credits.
+2) Request B begins and runs the same `SELECT ... FOR UPDATE` for the same company row. But A is still holding the row lock, so B does not get the row yet. It blocks and waits at the select.
+3) A charges the card (100 → 93), marks it charged, writes, and commits. The commit releases the row lock.
+4) B can now acquire the row lock. Only now does Postgres return the company row to B, and the row B receives includes A's committed update: 93 available credits.
+5) B charges (93 → 86), marks its card charged, writes, and commits.
+
+End state: 86 available, both cards charged.
+
+Notice what the lock is really doing: it is not "doing math for you". It is moving the wait before the read. T2 cannot read a stale company balance and then wait to write it later, because the read itself is blocked until T1 commits. That forces a clean serial order where each request makes its decision using current state.
 
 ### Coverage and deadlocks (the real footguns)
 
@@ -274,23 +369,40 @@ There is a second footgun that shows up as systems grow: lock ordering and deadl
 
 Postgres takes locks not only when you `SELECT … FOR UPDATE`, but also when you `UPDATE` rows. If two endpoints lock the same resources in different orders, you can deadlock even though each endpoint looks “reasonable” in isolation.
 
-Here’s a simple deadlock-shaped collision using campaigns (a campaign is just a grouping of cards):
+Here’s a simple deadlock-shaped collision using two company rows.
 
-1) Card creation endpoint:
-   - locks `company` (credits gate)
-   - then locks/updates `campaign` (assigns credits / due credits)
-2) Card deletion endpoint:
-   - locks/updates `campaign` first (unassigns credits)
-   - then locks `company` (restores credits)
+Imagine we add an internal endpoint that transfers credits from one company to another. It has to update two company rows: the source company and the destination company.
+
+One implementation locks the rows in the order it receives them:
+
+```sql
+-- Request A: transfer credits from company_1 to company_2
+BEGIN;
+SELECT id FROM company WHERE id = 'company_1' FOR UPDATE;
+SELECT id FROM company WHERE id = 'company_2' FOR UPDATE;
+-- update both balances
+COMMIT;
+```
+
+At the same time, another request performs the opposite transfer:
+
+```sql
+-- Request B: transfer credits from company_2 to company_1
+BEGIN;
+SELECT id FROM company WHERE id = 'company_2' FOR UPDATE;
+SELECT id FROM company WHERE id = 'company_1' FOR UPDATE;
+-- update both balances
+COMMIT;
+```
 
 If those two requests run at the same time, you can end up with:
 
-- Tx A holds the company lock and waits for the campaign lock.
-- Tx B holds the campaign lock and waits for the company lock.
+- Tx A holds the lock for `company_1` and waits for `company_2`.
+- Tx B holds the lock for `company_2` and waits for `company_1`.
 
 That is a deadlock. Postgres will pick one transaction to abort, and now you are in retry land even though you chose waiting as your failure mode.
 
-The fix is process discipline: pick a global lock order (e.g., always lock company first, then campaign) and enforce it everywhere credits move.
+The fix is process discipline: pick a global lock order and enforce it everywhere. For example, if a transaction needs to lock multiple companies, always lock them sorted by `company.id`, regardless of the business direction of the transfer.
 
 ### Pros
 
@@ -300,33 +412,11 @@ They also work well when your “charge a card” workflow isn’t a single SQL 
 
 And operationally, this is one of the nicest approaches to debug: Postgres can tell you who’s blocked, who’s blocking, and what they’re running.
 
-### Cons (the queue can bite you)
+### Cons
 
-The price you pay is latency under contention. If one company becomes a hotspot, row locks turn your critical section into a single-file line, and tail latency climbs fast.
+The price you pay is the waiting behavior we just discussed. If one company becomes a hotspot, row locks turn the critical section into a single-file line, and tail latency climbs fast.
 
-Here is a concrete example you can actually picture.
-
-Imagine one company is having a great day and is creating 10 cards per second, one every 100ms. So the first request arrives at second 0. The second at 0.1s. The third at 0.2s, and so on.
-
-Now suppose the work inside the lock, the critical section, takes 300ms per request. That means we can only process one request every 300ms for that company, because only one request can hold the lock at a time.
-
-At this point the problem should feel obvious. We receive a new request every 100ms, but we can only finish one every 300ms. If these requests did not need to lock the company row, they could run in parallel and this would not be a big deal. But here they cannot. They queue up.
-
-To see how the queue grows, look at the first few requests.
-
-The first request arrives at 0s and starts immediately. The second arrives at 0.1s, but the lock is still held, so it waits about 200ms until the first one finishes. Suddenly that second request has a total time around 500ms instead of 300ms.
-
-The third request arrives at 0.2s. It waits about 100ms for the first request to finish and then a full 300ms for the second to run. Its total time is now roughly 700ms.
-
-In general, each new request adds about 200ms of extra backlog, because 300ms of work arrives every 100ms of time. So the i-th request waits roughly `(i - 1) * 200ms` before it can even start.
-
-That escalates fast. After 10 seconds, you have received about 100 requests. The 100th request arrives at `99 * 100ms = 9.9s`, then waits `99 * 200ms = 19.8s` just to acquire the lock, and then spends its own 300ms doing work. The 100th request finishes around the 30-second mark from when the burst started.
-
-This is unsustainable.
-
-This is how waiting becomes an outage. Tail latency climbs, clients time out, retries add load, and the queue feeds itself.
-
-If you choose row locks, you have to ensure your per-company processing rate stays ahead of your per-company arrival rate. That usually means shrinking the critical section aggressively, and setting timeouts (`lock_timeout` and `statement_timeout`) so waiting cannot silently stretch into “forever” in production.
+If you choose row locks, you have to ensure your per-company processing rate stays ahead of your per-company arrival rate. That usually means shrinking the critical section aggressively and setting timeouts so waiting cannot silently stretch into forever in production.
 
 ### When I’d pick it (and when I wouldn’t)
 
@@ -361,15 +451,15 @@ The basic pattern is to acquire the mutex at the start of the transaction, then 
 await ctx.db.transaction(async (tx) => {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${companyId}))`);
 
-  companyRepo.setDb(tx);
-  cardRepo.setDb(tx);
-
-  const company = await companyRepo.find(companyId);
+  const company = await companyRepo.find(tx, companyId);
   if (!company) throw new Error("Company not found");
 
-  company.chargeCard(card, campaign);
-  await cardRepo.saveCard(card);
-  await companyRepo.saveWithCredits(company);
+  // Same charge flow as before:
+  // build the card, read the current balance, subtract the card cost,
+  // mark the card as charged, then persist both rows.
+
+  await cardRepo.saveCard(tx, card);
+  await companyRepo.saveCompany(tx, company);
 });
 ```
 
@@ -386,16 +476,16 @@ Here is a concrete situation where that flexibility matters.
 
 Imagine your “charge credits for a card” workflow touches several tables, and not all of them have a single obvious row you can lock that the whole team will naturally remember to lock first:
 
-- `company_credits` stores the current balances (`available_credits`, `due_credits`).
+- `company_credits` stores the current balance (`available_credits`).
 - `credits_ledger` is append only and stores every credit mutation for audits and debugging.
 - `company_usage_monthly` stores rollups for dashboards and alerts (for example, “credits spent this month”).
-- `card` stores the card itself, including whether it ended up charged or owed.
+- `card` stores the card itself, including whether it was charged.
 
 Now picture what one request does, all for the same company:
 
 1) Insert the new card row.
-2) Decide charged vs owed based on the current credit balances.
-3) Update `company_credits` (decrease available, or increase due).
+2) Compute the new available-credit balance.
+3) Update `company_credits`.
 4) Insert one row into `credits_ledger` that records what happened.
 5) Update `company_usage_monthly` so the UI and alerts stay current.
 
@@ -435,11 +525,11 @@ This does two things at once:
 
 Under concurrency, Postgres still takes a row lock for the update, so the second transaction will wait. The difference is that you are not holding the lock while your application does extra work. You are getting in, updating, and getting out.
 
-### A reservation that matches our charged vs owed rules
+### A reservation that gives the application enough context
 
-Our yardstick is slightly more complex. If there is not enough prepaid credit, we do not set available credits negative. We keep available credits as they are and increase due credits by the full card cost.
+The previous query is enough to protect the balance, but in the application we usually want a bit more context. We want to know what the balance was before the reservation, what it became after the reservation, and whether the reservation happened at all.
 
-You can still encode that decision as a single statement by using a CTE that tries the charged path first, and only runs the owed path if the charged update did not happen:
+We can still keep that as one atomic statement:
 
 ```ts
 async reserveCreditsForNewCardAtomic(
@@ -447,66 +537,41 @@ async reserveCreditsForNewCardAtomic(
   cardCost: number,
 ): Promise<{
   beforeAvailableCredits: number;
-  beforeDueCredits: number;
   afterAvailableCredits: number;
-  afterDueCredits: number;
-  charged: boolean;
 }> {
   if (cardCost <= 0) {
     throw new Error("Card cost must be > 0");
   }
 
   const rows = await this.db.execute(sql`
-    WITH charged AS (
-      UPDATE "company"
-      SET available_credits = available_credits - ${cardCost}
-      WHERE id = ${companyId} AND available_credits >= ${cardCost}
-      RETURNING
-        (available_credits + ${cardCost})::text AS before_available_credits,
-        due_credits::text AS before_due_credits,
-        available_credits::text AS after_available_credits,
-        due_credits::text AS after_due_credits,
-        true AS charged
-    ),
-    owed AS (
-      UPDATE "company"
-      SET due_credits = due_credits + ${cardCost}
-      WHERE id = ${companyId} AND NOT EXISTS (SELECT 1 FROM charged)
-      RETURNING
-        available_credits::text AS before_available_credits,
-        (due_credits - ${cardCost})::text AS before_due_credits,
-        available_credits::text AS after_available_credits,
-        due_credits::text AS after_due_credits,
-        false AS charged
-    )
-    SELECT * FROM charged
-    UNION ALL
-    SELECT * FROM owed
+    UPDATE "company"
+    SET available_credits = available_credits - ${cardCost}
+    WHERE id = ${companyId}
+      AND available_credits >= ${cardCost}
+    RETURNING
+      (available_credits + ${cardCost})::text AS before_available_credits,
+      available_credits::text AS after_available_credits
   `);
 
   const row = rows[0] as
     | {
         before_available_credits: string;
-        before_due_credits: string;
         after_available_credits: string;
-        after_due_credits: string;
-        charged: boolean;
       }
     | undefined;
 
-  if (!row) throw new Error("Company not found");
+  if (!row) {
+    throw new Error("Not enough credits or company not found");
+  }
 
   return {
     beforeAvailableCredits: Number(row.before_available_credits),
-    beforeDueCredits: Number(row.before_due_credits),
     afterAvailableCredits: Number(row.after_available_credits),
-    afterDueCredits: Number(row.after_due_credits),
-    charged: row.charged,
   };
 }
 ```
 
-The nice property is that the database returns a single answer that is already consistent. If it says "charged", you know credits were deducted. If it says "owed", you know due credits were increased.
+The nice property is that the database returns a single answer that is already consistent. If the statement returns a row, credits were reserved and the card can be marked as charged. If it returns no row, the reservation did not happen, so the application can reject the request or take whatever product-specific path makes sense.
 
 ### The endpoint shape (transaction, reserve, then persist)
 
@@ -514,28 +579,33 @@ Once you have a reservation function like that, the controller flow becomes:
 
 ```ts
 await ctx.db.transaction(async (tx) => {
-  // withLockRetry could wrap this if you add timeouts and want retries later.
+  const card = Card.new({
+    companyId,
+    recipientName: input.name,
+    address: input.address,
+    country: input.country,
+  });
 
-  companyRepo.setDb(tx);
-  cardRepo.setDb(tx);
+  const cardCost = card.getCreditCost();
 
   const reservation = await companyRepo.reserveCreditsForNewCardAtomic(
-    campaign.companyId,
+    tx,
+    companyId,
     cardCost,
   );
 
-  companyRef.setAvailableCredits(reservation.afterAvailableCredits);
-  companyRef.setDueCredits(reservation.afterDueCredits);
+  // Keep the in-memory object aligned with the database result if later
+  // code in the transaction needs the updated balance.
+  company.setAvailableCredits(reservation.afterAvailableCredits);
+  card.markAsCharged();
 
-  if (reservation.charged) {
-    card.markAsCharged();
-  } else {
-    card.markAsOwed();
-  }
-
-  await cardRepo.saveCard(card);
+  await cardRepo.saveCard(tx, card);
 });
 ```
+
+This example keeps the rule intentionally small: subtract prepaid credits if there are enough credits available.
+
+If your accounting model is more complex, the same idea still applies. For example, if you have a `due_credits` balance, ledger rows, or other derived counters, you can move more of the decision into the SQL statement. A CTE can check the available balance, choose the right branch, update one or more tables, and return the result the application needs. The important part is not that the statement is tiny. The important part is that the database performs the critical read and write as one atomic operation. And if that statement also saves a few application/database roundtrips along the way, even better, because every avoided roundtrip is time you are not spending inside the critical path.
 
 ### Why this tends to be much faster than `SELECT ... FOR UPDATE`
 
@@ -682,217 +752,22 @@ Serializable tends to work best when conflicts are relatively rare, but correctn
 
 If you expect sustained contention on the same company, you are trading a waiting queue for an abort and retry storm. That might be better or worse depending on your product, but it is still pain.
 
-Next, we will look at an approach that moves that contention out of Postgres entirely, by preallocating chunks of credits and spending them at high throughput elsewhere.
+## Next steps
 
-## Option 5: Chunk leasing (token bucket style)
+There is a pattern hiding under all four options in this article.
 
-So far, every option has one thing in common. Every request still has to touch Postgres in order to decide charged versus owed and update the balance correctly. The only thing we have been changing is how painful that interaction is.
+The problem is that every concurrent request wants to touch the same company row. That forces us to coordinate around that row. We can lock it explicitly with `SELECT ... FOR UPDATE`. We can lock it logically with an advisory lock. We can make the locked section smaller with an atomic update. Or we can let transactions race and ask Postgres to abort one of them when the result is not serializable.
 
-Chunk leasing is a bigger move. Instead of touching Postgres on every card creation, you reserve a big chunk of credits once, then you spend from that chunk at high throughput. When the chunk is empty, you go back to Postgres and reserve another one.
+But in all cases, the company balance is still the shared object everyone wants to mutate.
 
-The key idea is amortization. You do the expensive, contended operation rarely, and you do the per request operation against something fast, like Redis.
+So the natural question is: is there a way to get real parallelism here? A way where multiple cards can be created at the same time without each request caring about the other cards being created right now?
 
-### A concrete example
+There is. And, believe it or not, the idea comes from Italian bankers five centuries ago.
 
-Imagine a company has 10,000 prepaid credits and one of its campaigns starts creating cards in bursts. If we try to update the Postgres balance on every single card, we will eventually bottleneck on per request locking.
+I am talking about ledgers and double-entry bookkeeping.
 
-With chunk leasing, we might reserve credits in blocks of 300:
+The catch is that this requires a different model. Instead of treating the balance as the source of truth that must be updated in real time, you treat the ledger entries as the source of truth and derive the balance from them.
 
-1) Postgres: take 300 credits from the company balance and record that this chunk is now reserved.
-2) Redis: store a counter for this company with 300 tokens.
-3) Each card creation does a fast atomic decrement in Redis.
-4) When the counter hits zero, refill again by reserving another 300 from Postgres.
+That opens a very different design space, but it needs more time and care than we have left in this article. So we will talk about ledgers, double-entry bookkeeping, and how they compare with our current balance-based setup in a future article.
 
-Now instead of one Postgres balance mutation per card, you have one per 300 cards. That is the throughput win.
-
-### The Postgres primitive: take a chunk safely
-
-To do prepaid correctly, the chunk has to come from a real balance. The simplest pattern is an atomic update that only succeeds if the balance is high enough:
-
-```sql
-UPDATE accounts
-SET balance = balance - :bucketSize
-WHERE account_id = :id AND balance >= :bucketSize
-RETURNING balance;
-```
-
-If it returns a row, you got the chunk. If it returns nothing, the company does not have enough prepaid credits, and you have to decide what your product does next.
-
-### The Redis primitive: spend fast and atomically
-
-Once a chunk exists, the per request operation can be a single atomic decrement. You can do it with `DECRBY`, or you can wrap the logic in a Lua script to keep it atomic.
-
-This is where Redis shines for concurrency. Redis executes commands sequentially per shard, so a single operation like `DECRBY` is atomic from the point of view of your application. You do not have to worry about two servers racing and both successfully spending the same credits from the same bucket key.
-
-It is also fast. A Redis in memory decrement is typically sub millisecond, often in the tens or hundreds of microseconds. A Postgres balance mutation usually costs milliseconds and has more overhead, especially under contention. Exact numbers depend on network, load, and how much work you do in the critical section, but the difference in shape is consistent. Redis is a very tight, single operation. Postgres is a transaction and disk backed state.
-
-The hard part is not decrementing. The hard part is everything around it.
-
-### What if the request fails after spending in Redis?
-
-This is the question you have to be able to answer before you build this.
-
-Imagine the flow is:
-
-1) Spend 7 credits from the Redis bucket for company A.
-2) Create the card in Postgres.
-
-What happens if step 1 succeeds and step 2 fails?
-
-If you do nothing, you have "spent" credits for a card that does not exist. That is another money bug, just in a different direction.
-
-In practice, you need one of these patterns:
-
-- Compensation in the request path. If the DB transaction fails, you increment the Redis bucket back to refund the spend. Then you still need a crash recovery story for the window between spend and refund.
-- A durable spend log plus reconciliation. Every spend gets an idempotency key and is written to a durable log (DB ledger or an append only stream) so a background job can reconcile: either confirm it (card exists) or refund it (card never got created).
-
-Either way, chunk leasing is a shift in where the complexity lives. You are buying throughput by making Postgres less hot. You are paying for it with recovery and accounting discipline.
-
-### The real footgun: crashes and reconciliation
-
-If your process reserves 300 credits and then dies after spending 57 of them, what happens to the remaining 243?
-
-If you have no durable record, those credits can be lost or double spent. That is not a performance bug. That is a money bug.
-
-This is why chunk leasing almost always comes with extra machinery:
-
-- a lease or TTL on the chunk, so it can expire and be reclaimed
-- a durable log or ledger of spends, so you can reconstruct what happened after a crash
-- a reconciliation job that corrects drift
-
-If you are not willing to build that machinery, do not do this. It is not a free lunch.
-
-### When it makes sense
-
-Chunk leasing makes sense when you truly have a throughput problem per company, and you can justify the added complexity. It is a common pattern in distributed rate limiting, and the same idea applies here. You are turning per request balance checks into a fast counter operation, and paying complexity at refill and recovery time.
-
-Further reading:
-
-```text
-https://en.wikipedia.org/wiki/Token_bucket
-https://github.com/RussellLuo/ratelimiter
-https://stripe.com/blog/how-we-built-it-usage-based-billing
-```
-
-## Option 6: Queue and single writer
-
-Chunk leasing is what you do when the request path is too hot and you want to spend credits fast. A single writer is what you do when you want the cleanest correctness story at scale. You stop trying to mutate a shared counter from many web requests at once.
-
-Instead, you model card charging as usage events.
-
-This shifts the mental model. In the previous options, the goal was, "keep the balance correct at request time". In a single writer system, the primary goal becomes, "do not lose events, do not double apply events, and keep an audit trail you can replay." The balance becomes derived state.
-
-### The architecture in one picture
-
-For every chargeable action, you emit one usage event.
-
-In Manuscritten terms, that event might be, "card created for company X with cost 7, campaign Y, card Z".
-
-Those events go into a queue or stream where ordering is preserved per company. The important property is, "all events for the same company go to the same partition".
-
-Then a consumer group processes the stream. Only one consumer processes a given partition, so only one consumer is the writer for a given company at a time.
-
-Now you truly have one writer per company, without locks in the web request path.
-
-### A concrete example
-
-Imagine a company is creating cards in bursts. With a single writer, the web API does not try to decide charged versus owed and mutate credits directly. It only does one thing. It appends an event:
-
-- companyId: 123
-- cardId: abc
-- cost: 7
-- type: card.created
-
-The consumer reads that event and applies it in order:
-
-1) Check idempotency. If this event was already applied, ignore it.
-2) Append it to a durable ledger.
-3) Update a materialized balance view, if you keep one.
-
-This is where the charged versus owed decision happens. And because events are processed one at a time per company, there is no race.
-
-### Prepaid credits and overages
-
-This approach is very common in AI companies and other usage based products where prepaid and pay as you go live together.
-
-The flow is:
-
-1) Burn down prepaid credits while there are credits left.
-2) After prepaid is exhausted, keep recording usage as overage.
-3) Bill the overage later.
-
-This is why it does not always preserve the same invariant as the previous options. If you allow overage, you are intentionally not enforcing "balance never goes below zero" in the web request path. You are enforcing "billing is correct when the ledger is processed."
-
-That can be a great trade if your product supports it. It can also be unacceptable if you need a hard stop.
-
-### If you need a hard stop
-
-If the business requirement is, "do not create the card if prepaid credits are insufficient", you need the API to wait for the single writer's decision.
-
-In practice that looks like one of these:
-
-- Sync over async. The API enqueues the event and then blocks until the consumer writes back a decision, with a timeout.
-- Authorize and capture. The API reserves an upper bound first, then later the consumer finalizes the exact spend.
-
-These patterns can work, but they add latency and complexity. This is one reason why many systems choose to allow overage instead.
-
-### The real footguns: idempotency and outbox
-
-A single writer system can be incredibly correct, but only if you get two basics right.
-
-First, idempotency. Events must have a unique idempotency key so retries and duplicates do not double charge. The consumer should store that key in durable state and only apply it once.
-
-Second, event emission must be reliable. If your API both writes business state and emits a usage event, you need to avoid the split brain failure:
-
-- state commit succeeded, but the event was never emitted
-- event emitted, but state commit failed
-
-The usual answer is the outbox pattern. You write an outbox row in the same database transaction as the business state, then a separate publisher reliably streams it to your queue.
-
-### Pros and cons
-
-The main upside is that you remove hot row contention from the web request path. Bursts become a backlog in your queue, not a lock queue in Postgres. You also get a natural place for a durable ledger and auditing.
-
-The downside is that you are building infrastructure. You now own a queue, consumers, retry behavior, idempotency, and the operational surface area that comes with it. Failures become asynchronous and can be harder to reason about without good observability.
-
-### When it makes sense
-
-Single writer makes sense when your per company throughput is high, you care about auditability, and you can afford the architecture. It is also a very natural fit for hybrid billing models where overage is acceptable.
-
-Further reading:
-
-```text
-https://stripe.com/blog/how-we-built-it-usage-based-billing
-https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/
-https://www.confluent.io/learn/kafka-partition-key/
-```
-
-## Decision: what we chose in Manuscritten
-
-All of the options above can be correct. The real question is which pain you are willing to live with.
-
-In Manuscritten, we started with row level locks because they are the simplest correctness story. They worked, but the k6 test from the previous post made something clear. Under contention, tail latency got ugly.
-
-Atomic reservation gave us the same correctness properties, but it reduced the critical section to a single statement. In practice, that was enough. It kept the system responsive even for hot companies.
-
-Our internal contract is simple:
-
-1) Reserve credits in the database using a single atomic function.
-2) Use the returned result to decide charged versus owed.
-3) Persist the card and the balance update in the same transaction.
-
-If we ever hit a point where per company throughput grows past what a single row update can handle, our next step is chunk leasing with Redis. That trades database contention for reconciliation complexity, and we would only pay that price if we truly need it.
-
-## Conclusion
-
-If you take one thing from this post, let it be this. Picking a concurrency strategy is picking a failure mode.
-
-Row locks and advisory locks fail by waiting. Serializable fails by aborting and forcing retries. Chunk leasing fails by making recovery and reconciliation part of your correctness story. A single writer fails by making your system architecture bigger.
-
-None of those is universally right. They are right under different constraints.
-
-If you are building a credits system today, my default recommendation is atomic reservation in Postgres. It is usually the best balance between correctness, performance, and operational complexity.
-
-And then, the most important part. Whatever strategy you pick, make it a contract. Every endpoint that moves credits has to follow the same rule, or the bug will come back the moment the product grows.
-
-Comment: what is the worst failure mode for you, waiting, retries and aborts, or accidental bypass, and why?
+That is it for today.

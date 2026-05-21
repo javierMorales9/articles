@@ -1,30 +1,38 @@
-# The Day Concurrency Broke the Billing of My App
+# The Day Concurrency Broke the Billing of My App. And how it can happen to you
 
 About a week before everything broke, we had launched the Manuscritten API.
 
-That API was supposed to remove a very annoying step from our customers' workflow.
+That API was supposed to remove a very annoying step from our customers’ workflow.
 
-Until then, many customers had to upload CSVs when they wanted to create a batch of handwritten letters. The API would let them do it directly from their own applications: CRM workflows, ecommerce automations, internal tools, whatever already had the customer data.
+Until then, many customers had to upload CSVs when they wanted to create a batch of handwritten letters. But that approach required manual work and was error prone (which led to us having to routinely jump into calls with customers every time they wanted to make a new campaign. Not recommended).
 
-That was the promise: connect Manuscritten once, then send handwritten letters from the tools they were already using.
+We wanted to get rid of all the hassle. And we expected that the new API would help us automate much of the process by letting them send the letter info directly from their own applications: CRM workflows, ecommerce automations, internal tools, wherever they already had their data.
 
-Then one of our best customers used it for real.
+The main objective was to make handwritten letters work as any other digital marketing channel: we jump with you in to a call (no way to avoid this, it seems), we help you connect our app to your current workflow, and from that point forward you start sending letters to your clients physical inbox without thinking about it ever again. That was the theory.
 
-The API looked fine.
+And, to be honest, everything seemed to be working as expected. The first integrations we did with a couple of low-volume clients that wanted to connect their CRM were successful.
 
-The letters were there. The addresses were there. There were no obvious errors in the admin panel.
+So we opened it up for everyone else. And most of them didn’t gave a shit.
 
-Only one thing was wrong: the credits barely moved.
+But there was one that was very thrilled about it. He had mentioned to us on a few occasions that he wanted to run an upselling campaign for some active customers, but in the end, for one reason or another, he never got around to it. And now that, thanks to the API, he didn’t have to export the data and could connect the CRM, he wanted to give it a try.
 
-We had received around 1,000 letter creation requests. But the company balance looked as if we had charged only around 100 of them.
+So we jumped into a call and helped him set up the integration. And tested with a few active users, and their letters were created correctly inside Manuscritten.
 
-If each letter costs roughly $3, this was not a rounding error. It was the difference between about $3,000 of work and about $300 charged. Around $2,700 had effectively disappeared from the billing state.
+So perfect, job done, we said. But then came the big blow. 
 
-Nothing had exploded. That was the dangerous part. Every individual request could succeed while the final accounting state was wrong.
+Two days after setting up the integration I received a notification in slack saying that the letter creation endpoint was in fire. I went to check the logs and I saw that more than 1.000 letters had been created in the **just one second**. And believe me, for a small startup, that is a couple orders of magnitude greater that what we usually had.
 
-It did not take long to realize what had happened: our credits system had a race condition.
+When I checked, it turned out that all of the letters were from the same customer we had set up the integration for two days before. He had made a dump of all its active users to our API all of them at once.
 
-In this series, I want to unpack four things:
+With the spike of adrenaline still going around my body I went to the app to see if the letters were there and, surprisingly, they were. The addresses looked fine, the logs showed that all requests returned a 200 code. There were no obvious errors in the admin panel.
+
+Only one thing was wrong: the credits barely moved. In principle, every letter that we receive got charged immediately. So if a customer has 100$ available in credits their account, and we receive a card that costs 3$, their credit balance should end up being 97$. Simple math.
+
+But that was not what happened with the 1.000 received cards. In that case, it looks like only 20 of them were charged. I could not believe my eyes when I saw it. The customer had roughly 3500$ in credits before the dump. If each letter costed 3$, the final balance should have been 3500 - 3000 = 500$. But instead showed that 3440$ were remaining. We had charged 2940$ less that we should have!
+
+How could that be? Well, it did not take long to realize what had happened: our credits system had a race condition.
+
+And that’s what I want to talk about in this series of articles. In particular:
 
 - the exact mechanism that broke the credits system, and how to recognize designs that are vulnerable to the same bug;
 - why these problems are hard to find during normal development, and why unit tests and regular integration tests rarely help;
@@ -39,24 +47,13 @@ Manuscritten sends handwritten letters for companies.
 
 And yes, I mean real letters. Physical letters. Written by hand, although in our case the hand belongs to a robot. They are the kind of thing a company sends when it wants to leave a warmer impression than another email notification or another automated WhatsApp.
 
-Customers use them for prospecting, reactivation, thank-you notes, loyalty campaigns, and follow-ups after a customer signs up, purchases, or reaches some milestone in a CRM.
+In what cases are they useful?
 
-Our mission is to make sending those handwritten letters as easy as possible.
+Well, imagine an ecommerce company has just launched a new product and they want to send a handwritten letter to customers who have already bought from them three times, because those customers are good candidates for an upsell.
 
-That means we cannot ask customers to change how their business already works. If their customer data lives in a CRM, an ecommerce platform, or an internal tool, Manuscritten has to connect to those tools. The API was the piece that made that possible.
+So, they set up an automation in their CRM like this: *When a customer’s purchase count reaches 3, send that customer’s name and address to the Manuscritten API*.
 
-Once the connection existed, customers could start sending real handwritten letters to their customers' mailboxes without moving a finger. Or picking up a pen.
-
-Imagine an ecommerce company has just launched a new product. They want to send a handwritten letter to customers who have already bought from them three times, because those customers are good candidates for an upsell.
-
-They set up an automation in their CRM:
-
-```text
-When a customer's purchase count reaches 3,
-send that customer's name and address to the Manuscritten API.
-```
-
-From the customer's point of view, this is simple. Their CRM detects a business event and calls our API.
+From the customer’s point of view, this is simple. Their CRM detects a business event and calls our API.
 
 From our point of view, the flow is:
 
@@ -80,16 +77,6 @@ flowchart LR
   Mail --> Recipient[Recipient mailbox]
 ```
 
-This matters because the API turned letter creation from a manual batch operation into something software could trigger automatically.
-
-A historical sync can send many letters.
-
-A CRM workflow can send many letters.
-
-An ecommerce automation can make many customers eligible at the same time.
-
-So concurrency was not an exotic edge case. It was a normal consequence of the product working as intended.
-
 For this article, the interesting part is one box in that diagram: **Charge the letter**.
 
 That is where the race condition lived.
@@ -104,13 +91,13 @@ That variability matters because every physical letter has a real cost: paper, i
 
 The model we use is prepaid credits.
 
-A customer buys credits in advance. Then, every time a new letter arrives through the API, we calculate its cost and subtract it from the company's available credits.
+A customer buys credits in advance. Then, every time a new letter arrives through the API, we calculate its cost and subtract it from the company’s available credits.
 
 The price of a letter can depend on things like destination country, paper quality, and other production details. But the simplified model is intentionally small:
 
-Each company has a credit balance. Each letter has a price. When a letter arrives, we calculate the cost and charge it against the company's credits.
+Each company has a credit balance and each letter has a price. When a letter arrives, we calculate the cost and charge it against the company’s credits.
 
-The simplified model looks like this:
+It can be represented with something like this:
 
 ```ts
 class Company {
@@ -129,27 +116,17 @@ class Letter {
 
 `availableCredits` represents prepaid credits the company can spend.
 
-For this first article, the important case is the happy path: a letter arrives, the company has enough credits, and we subtract the letter price from `availableCredits`.
-
-The invariant is straightforward:
+The main invariant that the billing system has to preserve is that:
 
 ```text
 finalAvailableCredits = initialAvailableCredits - totalChargedLetterCost
 ```
 
-If a company starts with 100 credits and we successfully charge letters worth 8 credits, the company should end with 92 credits.
+If a company starts with 100 credits and we successfully charge letters worth 8 credits, the company must end with 92 credits.
 
-That sounds almost too obvious to write down.
+Ok, so why did the endpoint break then?
 
-But when a system has money-like state, the obvious invariant is exactly the thing worth protecting.
-
-So what happened when a letter arrived through the API?
-
-The real endpoint had validation, campaign checks, design lookups, address validation, analytics, and side effects. None of that is the interesting part of the bug.
-
-The accounting shape was the interesting part.
-
-Simplified, the code did something like this:
+You’ll understand it when you see the code. The endpoint basically did something like this:
 
 ```ts
 await db.transaction(async (tx) => {
@@ -267,97 +244,64 @@ Final state:
 company.availableCredits = 95
 ```
 
-Both letters exist.
+Both letters requests succeeded.
 
-Both requests succeeded.
-
-But the company was charged only 5 credits. John's 3 credits disappeared from the accounting result.
-
-If the writes happen in the opposite order, the final balance is 97 and Tracy's 5 credits disappear instead.
-
-The database did exactly what we asked it to do.
-
-That was the uncomfortable part.
+But the company was charged only 5 credits. John’s 3 credits disappeared from the accounting result.
 
 Postgres did not randomly lose credits. It stored the values the application sent. The bug was that both values had been computed from the same stale balance.
 
+I hope you know understand why, when we received the 1.000 letters from our client we only charged 20.
+
+In our case, the company had 3500$, and each card costed 3$. Let’s say how this logic apply when there are more than two concurren requests.
+
+Let’s say that a card creation request takes 400ms to be processed. And that, during the spike, we receive a letter every 20ms in average. Then, between the time we receive the first request (Request 1) until that request finishes (commit), we receive another 20 requests (Requests 1 - Request 20). Well, the problem is that, all of these 20 requests will read the same `availableCredits` from the company, 3500$, so all of them come to the conclusion that the new company balance (new `availableCredits`) should be 3500 - 3 = 3497. **All of them write the same value to db**.
+
+So, we end up charging 3$ when we should have charged 60. **20x** less that we should have.
+
+```text
+Initial company credits: 3500$
+
+    Time
+  0ms | <--- Request 1 comes (reads company.availalbeCredits = 3500$)
+ 10ms | 
+ 20ms | <--- Request 2 comes (reads company.availalbeCredits = 3500$)
+ 30ms |
+ 40ms | <--- Request 3 comes (reads company.availalbeCredits = 3500$)
+ 50ms |
+      .
+      .
+      .
+380ms | <--- Request 20 comes (reads company.availalbeCredits = 3500$)
+390ms |
+400ms | ---> Request 1 finishes (writes company.availableCredits = 3497$)
+410ms |
+420ms | ---> Request 2 finishes
+430ms |
+440ms | ---> Request 3 finishes
+      .
+      .
+      .
+```
+
 ## But There Was A Transaction
 
-This is the natural objection.
+This is the natural objection. And it is the one that makes this kind of bug easy to miss during development.
 
-And it is the one that makes this kind of bug easy to miss during development.
-
-The code used a transaction. The letter, campaign, and company were saved together. The request did not leave the system half-written.
+The code used a transaction. The letter and company were saved together. The request did not leave the system half-written.
 
 But that was not the problem.
 
 A transaction can make a set of operations atomic for one request. It does not automatically make a read-modify-write sequence safe when another transaction is reading and writing the same balance at the same time.
 
-In fact, because of MVCC and transaction isolation, this is exactly the kind of thing a database is designed to allow. One transaction does not normally see another transaction's uncommitted changes. So unless we explicitly tell the database to coordinate access to that company balance, each request can work from its own snapshot and have zero knowledge that another request is touching the same row.
+In fact, because of MVCC and transaction isolation, this is exactly the kind of thing a database is designed to allow. One transaction does not normally see another transaction’s uncommitted changes. So unless we explicitly tell the database to coordinate access to that company balance, each request can work from its own snapshot and have zero knowledge that another request is touching the same row.
 
 That is how a transaction can still make a correct local decision from stale global state.
 
-Two transactions can both read:
-
-```text
-available_credits = 100
-```
-
-Then both can compute different new absolute values:
-
-```text
-Request A: 100 - 3 = 97
-Request B: 100 - 5 = 95
-```
-
-And both can later write their own result:
-
-```text
-Request A writes 97
-Request B writes 95
-```
-
-The last writer wins.
-
-One subtraction disappears.
-
-Here is the same interleaving as a sequence:
-
-```mermaid
-sequenceDiagram
-  participant A as Request A
-  participant B as Request B
-  participant DB as Postgres
-
-  A->>DB: BEGIN / SELECT credits = 100
-  B->>DB: BEGIN / SELECT credits = 100
-  A->>A: compute 100 - 3 = 97
-  B->>B: compute 100 - 5 = 95
-  A->>DB: UPDATE credits = 97 / COMMIT
-  B->>DB: UPDATE credits = 95 / COMMIT
-```
-
-The bug was not that we forgot to use a transaction.
-
-The bug was that the transaction persisted a decision made from a value that was no longer current by the time we wrote it back.
-
 ## Why This Was Hard To Notice
 
-The worst part of this bug was that the individual records looked fine.
+The worst part of this bug was that the individual records looked fine, their addresses where in place and there were no request failures.
 
-If you opened the admin panel, the letters were there.
-
-If you inspected the addresses, they were there.
-
-If you looked for request failures, there was nothing obvious.
-
-That is why this class of bug is so dangerous. It does not necessarily break the thing you are staring at.
-
-The failure was not in the existence of a letter.
-
-It was in the sum of all successful letters.
-
-Normal tests rarely catch that.
+That is why this class of bug is so dangerous. It does not necessarily break the thing you are staring at and normal tests rarely catch them.
 
 A unit test that calls the billing method once will pass.
 
@@ -367,22 +311,14 @@ Even an integration test that creates ten letters sequentially can pass, because
 
 The bug only appears when multiple successful operations overlap in time and mutate the same accounting state.
 
-That is exactly what real customers do once you give them an API.
+And if you don’t check it in advance you are very prone to find the issue in production.
 
-## How Can We Reproduce The Bug Then?
+## Ok, so what now then?
 
-This is where unit tests and regular integration tests stop being enough.
+Well, if this concurrency bug is hard to reproduce and we didn’t catch it until it was living in production. Jumping directly to find a solution to the issue you’ll agree with me that is not a good idea.
 
-Concurrency bugs are difficult because they are uncertain. Sometimes the requests overlap in exactly the wrong way. Sometimes they do not. Sometimes the bug appears immediately. Sometimes you run the same flow again and everything looks fine.
+If we want to know if our solutions works as intended, we need a test that reproduces the kind of stress under which this bug appears. Otherwise we cannot know whether a solution really fixed the issue, or whether we simply failed to trigger it that time.
 
-That is not good enough for a billing system.
+That’s precisely what we are going to see in the next article. Were we will build a test that can simulate concurrent API traffic, reproduce the bug we had seen in production and check if the the accounting stays correct even when the API receives thousands of requests.
 
-If we want to know that the system works as intended, we need a test that reproduces the kind of stress under which this bug appears. Otherwise we cannot know whether a solution really fixed the issue, or whether we simply failed to trigger it that time.
-
-So the first step was not to choose the cleverest database fix.
-
-The first step was to build a test that could simulate concurrent API traffic and reproduce the bug we had seen in production.
-
-Only after that could we compare possible solutions and see whether they actually protected the numbers.
-
-In the next post, I will show how we built that test with k6, and how to check that the accounting stays correct even when the API receives thousands of requests.
+See you there!

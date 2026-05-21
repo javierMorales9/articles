@@ -94,3 +94,27 @@ The API looked fine.
 ```
 
 Rule of thumb: if a concept needs detail to be understood, either provide the detail immediately or delay the concept until the article is ready to explain it. Do not strand it in a throwaway sentence.
+
+## Do Not Name Intentionally Omitted Scope
+
+When the article deliberately excludes a concept, implementation branch, subsystem, or edge case, do not call attention to that omission in the prose.
+
+Bad shape:
+
+```text
+The real system also has due credits, purchase compensation, and one-time campaigns, but I will not cover those here.
+```
+
+Why it fails:
+
+- it distracts the reader with concepts the article will not teach;
+- it creates open loops with no payoff;
+- it makes the article feel like an internal scope memo instead of a focused technical story.
+
+Better shape:
+
+```text
+The test checks one invariant: the company balance after card creation must equal the initial balance minus the cost of the cards created during the run.
+```
+
+Rule of thumb: if a detail is out of scope, simply keep it out of the article unless the reader needs it to understand the current argument.
