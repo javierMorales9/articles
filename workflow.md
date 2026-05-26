@@ -263,6 +263,8 @@ The output should help future writing sessions resume without repeating the same
 
 When turning schemas, outlines, or drafts into article material, also follow `writing_rules.md`.
 
+Use `content_rules.md` for structure, examples, context, stakes, and explanation design. Use `style_rules.md` for prose voice, pacing, sentence-level style, and AI-pattern avoidance throughout the article workflow.
+
 ## Header Images
 
 After a post has `article.md`, use `header_image.md` when the user asks for a visual header. The default output is `postN/header_image.png`, stored beside the post article.

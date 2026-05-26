@@ -6,7 +6,7 @@ This repository is the home for **blog article series**. Treat every project as 
 Articles usually explain technical work that has already been done in another codebase. To make that workflow reliable, each series keeps a **stable snapshot** of the relevant product/code repo under `ref/`, plus a `commits.md` file describing the commit range that matters for the story.
 
 For the full operating procedure, read `workflow.md`.
-For editorial drafting and article-shaping rules, read `writing_rules.md`.
+For editorial drafting and article-shaping rules, read `writing_rules.md`, `content_rules.md`, and `style_rules.md`.
 For post header image generation, read `header_image.md`.
 
 ## Language
