@@ -13,4 +13,6 @@ When creating or revising `series.md`, `draft.md`, or `article.md`, follow both 
 
 `draft.md` is allowed to be rough, but it should not use AI filler as scaffolding. A rough paragraph with the right voice is easier to turn into an article than a polished-sounding paragraph that says nothing.
 
+`draft.md` should also behave like a reviewer. At the start of each section, include a concise `Section Review` note that flags weak prose, missing explanations, abrupt transitions, absent examples, or violations of `content_rules.md` before the section's draft prose.
+
 Do not let `style_rules.md` override technical accuracy. If a section needs careful qualification, keep the qualification, but write it plainly.

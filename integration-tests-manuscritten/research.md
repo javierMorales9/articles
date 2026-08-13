@@ -2,17 +2,30 @@
 
 ## Series Preparation
 
-This series is based on the current `ref/` snapshot rather than a specific commit range.
+This series is based on the current `ref/` snapshot at `fd43c2be`, with post 2 focused on the integration-test performance commits listed in `commits.md`.
 
 Primary files inspected:
 
 - `apps/web/src/tests/integration/server/`
 - `apps/web/src/tests/utils/TestContext.ts`
+- `apps/web/src/tests/utils/serverIntGlobalSetup.ts`
+- `apps/web/src/tests/utils/serverIntGlobalTeardown.ts`
 - `apps/web/jest.config.ts`
 - `apps/web/jest.server.setup.ts`
 - `packages/db/testFunctions.ts`
 - `packages/db/resetDb.ts`
 - representative API and repository code involved in the tests
+
+Post 2 performance arc:
+
+- Baseline described by the earlier research: one PostgreSQL container per integration test file, with migrations paid repeatedly and `resetDatabase` truncating public tables before each test.
+- First major optimization: use Jest `globalSetup`/`globalTeardown` to start one PostgreSQL container for the whole `server-int` project, then create one database per Jest worker inside that container.
+- Second major optimization: stop truncating the whole database between tests by making each test create fresh company-scoped fixtures.
+- Third major optimization: create and migrate a template database once, then create each worker database with `CREATE DATABASE ... TEMPLATE ...`.
+- Final cleanup: remove timing logs, fallback code paths, and per-context container ownership from the harness.
+- Experiments tried and reverted:
+  - keeping/reusing the container and template database across separate test runs;
+  - replacing `next/jest` project selection with a dedicated inline Jest config.
 
 ## High-Level Testing Shape
 
@@ -99,16 +112,16 @@ Some individual test files override that address validation mock when they need 
 
 `createTestContext(company?: Company)`:
 
-1. Starts a PostgreSQL container from `postgres:16-alpine`.
-2. Creates database `manus_test`.
-3. Uses username/password `manus`/`manus`.
-4. Reads the runtime connection URI from the container.
-5. Assigns `process.env.DATABASE_URL` to that URI.
-6. Calls `jest.resetModules()`.
-7. Runs database migrations.
+1. Reads shared server integration state from a JSON file in the OS temp directory.
+2. Uses `JEST_WORKER_ID` to derive a worker database name such as `manus_test_worker_1`.
+3. Creates that worker database inside the already-running PostgreSQL container if it does not exist.
+4. Creates the worker database from the migrated template database.
+5. Stores worker readiness and URL in process env vars so the same worker can reuse its database connection URI.
+6. Assigns `process.env.DATABASE_URL` to the worker database URI.
+7. Calls `jest.resetModules()`.
 8. Creates a Drizzle database instance.
 9. Creates a tRPC caller using `createCaller`.
-10. Returns a `TestContext` containing the container, db, api caller, and optional default company.
+10. Returns a `TestContext` containing the db, api caller, and optional default company.
 
 The created tRPC context includes:
 
@@ -127,7 +140,7 @@ The created tRPC context includes:
 
 `TestContext.authenticatedWith(company)` rebuilds the API caller with a different authenticated company. This lets tests switch between normal-company and admin-company behavior without rebuilding the container.
 
-`TestContext.teardown()` stops the PostgreSQL container.
+`TestContext.teardown()` closes the Drizzle/postgres client. It no longer owns or stops a PostgreSQL container; the container lifecycle belongs to Jest `globalSetup` and `globalTeardown`.
 
 Each integration test file generally follows this shape:
 
@@ -143,11 +156,12 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await resetDatabase(context.db);
+  resetFixtures();
+  context.authenticatedWith(workingCompany);
 });
 ```
 
-Most files also register `SIGINT` and `SIGTERM` handlers to stop the container before process exit.
+Most files also register `SIGINT` and `SIGTERM` handlers that call `context.teardown()` before process exit.
 
 ## Database Creation And Migrations
 
@@ -167,6 +181,23 @@ Graphile Worker matters because some endpoint behavior enqueues jobs and the tes
 
 `createDb(url)` creates a Drizzle database instance from the connection string and the project schema.
 
+`apps/web/src/tests/utils/serverIntGlobalSetup.ts` now performs the expensive database setup once for the whole server integration Jest project:
+
+1. Start a single PostgreSQL container from `postgres:16-alpine`.
+2. Create the normal `manus_test` database with user/password `manus`/`manus`.
+3. Create a `manus_test_template` database inside the same container.
+4. Run Drizzle and Graphile Worker migrations against the template database.
+5. Lock the template database with `ALTER DATABASE ... WITH ALLOW_CONNECTIONS false`.
+6. Write the container connection URI and template database name into the temp state file.
+
+Each worker database is then created with:
+
+```sql
+CREATE DATABASE "manus_test_worker_N" TEMPLATE "manus_test_template";
+```
+
+The article can frame this as moving migration cost out of each worker/test-file path. Migrations still run against a real PostgreSQL database, but only once per integration test run.
+
 ## Reset Strategy
 
 `packages/db/resetDb.ts` defines `resetDatabase(db)`.
@@ -177,15 +208,25 @@ It executes a PostgreSQL block that:
 - runs `TRUNCATE TABLE ... RESTART IDENTITY CASCADE`;
 - lowers client notices to warnings while doing this.
 
-This is a database-wide reset within the container. The current pattern is:
+This remains available as a helper, but the optimized integration tests no longer use it as the default per-test isolation mechanism.
+
+The old pattern was:
 
 - one container per test file/suite;
-- migrations once in `beforeAll`;
+- migrations once in each file's `beforeAll`;
 - truncate all public tables before each test.
 
-This avoids starting a fresh container for every individual test while keeping tests isolated inside a suite.
+The new pattern is:
 
-Because each Jest test file creates its own container, parallel Jest workers can run different files without sharing a database. Within each file, tests share a container but reset data before each case.
+- one PostgreSQL container for the server integration Jest project;
+- one database per Jest worker inside that container;
+- one migrated template database copied into worker databases;
+- no database-wide truncate in normal `beforeEach` hooks;
+- per-test fixture regeneration, especially fresh companies.
+
+The important domain trick is company scoping. Most Manuscritten server endpoints operate relative to the authenticated company. Campaigns, cards, senders, billing state, and authorization checks are normally filtered by company ownership. If each test creates a fresh company and authenticates as that company, stale rows from previous tests can remain in the worker database without affecting the current test's endpoint behavior.
+
+This is not a universal reset strategy. It works here because company ownership is a strong namespace for most behaviors under test. Tests that use global uniqueness, admin-wide queries, Graphile job tables, or state not scoped by company still need extra care.
 
 ## What Is Real And What Is Mocked
 
@@ -394,36 +435,54 @@ This keeps setup readable while still using real repositories and persisted reco
 
 ## Current Parallelization And Container Tradeoff
 
-Current implementation starts one PostgreSQL container per integration test file.
+Current implementation starts one PostgreSQL container for the whole server integration Jest project, not one per test file.
+
+The old implementation was simple but expensive:
+
+- each integration test file called `createTestContext` in `beforeAll`;
+- `createTestContext` started a new `postgres:16-alpine` container;
+- each file paid the migration cost;
+- each test truncated public tables before running;
+- many files meant many Docker containers.
+
+The optimized implementation keeps the real-database guarantee but changes the isolation boundary:
+
+- Jest `globalSetup` starts one shared PostgreSQL container;
+- `globalSetup` creates and migrates `manus_test_template`;
+- each Jest worker gets its own database inside that container;
+- worker databases are copied from the migrated template database;
+- tests isolate normal product data by creating fresh company-scoped fixtures;
+- `globalTeardown` stops the shared container and removes the temp state file.
+
+The root `test:int` command runs the server integration project with `--maxWorkers=8`, so the intended scaling shape is up to eight worker databases inside one PostgreSQL container.
 
 Advantages:
 
-- strong isolation between files;
-- natural compatibility with Jest workers;
-- no accidental data sharing across files;
-- no need to create per-worker schemas or databases;
-- simple mental model.
+- Docker startup is paid once per test run;
+- migration cost is paid once against the template database;
+- workers can run in parallel without sharing the same database;
+- tests avoid expensive whole-database truncation in the common case;
+- the setup still uses real PostgreSQL, real migrations, real Drizzle queries, and real Graphile tables.
 
-Costs:
+Costs and caveats:
 
-- if many test files run in parallel, many PostgreSQL containers may start;
-- first-run migration cost is paid per file;
-- Docker availability is required;
-- local runs can be slower or heavier than unit tests.
+- Docker is still required;
+- the harness is more complex than one container per file;
+- database names and temp state must be coordinated across Jest processes;
+- worker database creation needs an advisory lock to avoid concurrent `CREATE DATABASE` races;
+- company-scoped isolation depends on the product's data model and cannot be blindly copied to every application;
+- tests that assert global behavior must still avoid hidden coupling with data left by previous tests.
 
-The user specifically wants the second article to discuss avoiding "200 Docker containers." This snapshot currently shows the simple per-file-container pattern. The article should either:
+The measured story from the commits is:
 
-- describe this as the current baseline and then propose/describe a later optimization, if implemented elsewhere; or
-- inspect any newer implementation before writing final prose if the production branch has changed.
+- one-container-per-file baseline: about 46 seconds per run;
+- one shared container with worker databases: about 11 seconds per run;
+- later optimizations, especially template database creation and avoiding per-test truncation, brought the run down to about 6 seconds.
 
-Potential optimization directions to verify before writing article 2:
+Two experiments are useful negative research:
 
-- one container per Jest worker;
-- one container for the whole integration project;
-- one database/schema per worker;
-- transactional rollback per test;
-- company-level namespacing for tests that can safely share a database;
-- explicit unique company IDs/external IDs to avoid cross-test collisions.
+- Reusing the container/template database across separate test runs with Testcontainers reuse and migration hashing was implemented, then reverted because it did not improve enough to justify the extra machinery.
+- Creating a dedicated `jest.server-int.config.ts` and bypassing `next/jest` was implemented, then reverted because it did not materially improve runtime.
 
 ## Article 1 Technical Angle
 
@@ -467,21 +526,26 @@ The second article can explain the Manuscritten setup:
 - Jest project separation between client, server unit, and server integration tests.
 - Testcontainers PostgreSQL setup.
 - Running Drizzle and Graphile migrations inside the container.
+- Creating a migrated template database once per run.
+- Creating one worker database per Jest worker with `CREATE DATABASE ... TEMPLATE ...`.
 - Building a tRPC caller directly with test context.
 - Using real repositories against the test database.
-- Resetting state with `TRUNCATE ... RESTART IDENTITY CASCADE`.
+- Avoiding per-test `TRUNCATE` by regenerating company-scoped fixtures.
 - Mocking external boundaries while keeping database behavior real.
 - Switching authenticated company context with `authenticatedWith`.
 - Tradeoffs around container count, test speed, and parallelism.
 
-The article should be careful to distinguish:
+The article should use the optimization as the concrete narrative:
 
-- currently observed implementation in this snapshot;
-- recommendations or improvements that are not present in the snapshot.
+- start with the working-but-slow version;
+- identify the actual cost centers: Docker containers, migrations, cleanup;
+- show the three levers: one container, one DB per worker, company-scoped data isolation;
+- mention the template database as the migration optimization;
+- mention the reverted experiments as examples of measuring instead of guessing.
 
 ## Open Questions Before Drafting
 
-- Should article 2 describe the current one-container-per-file approach as the actual implementation, or has Manuscritten since moved to a shared-container/per-worker setup?
 - Does the user want the first article to use a fully fictional company-name controller example, or should it be lightly inspired by Manuscritten's company endpoints?
 - Should article 1 include code snippets only as pseudocode, or should it include TypeScript-style snippets matching the Manuscritten stack?
 - For article 2, should we include exact command snippets such as `npm run test:server-int` and selected helper code excerpts?
+- Confirm the final runtime number to use in prose: the commit message records 46s to 11s for the first big optimization, while the user reports the final result as 46s to 6s after all three levers.

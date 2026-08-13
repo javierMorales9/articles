@@ -71,20 +71,22 @@ Observed implementation in the current snapshot:
 - Server integration tests run in Node.
 - They live under `apps/web/src/tests/integration/server/`.
 - They use `jest.server.setup.ts`.
-- `TestContext` starts a PostgreSQL container with `@testcontainers/postgresql`.
+- Jest `globalSetup` starts one PostgreSQL container with `@testcontainers/postgresql`.
 - The container uses `postgres:16-alpine`.
-- Migrations run before tests:
+- A migrated template database is created once per integration test run.
+- Each Jest worker gets its own database copied from the template database.
+- Migrations run against the template database:
   - Drizzle migrations;
   - Graphile Worker migrations.
 - Tests call tRPC procedures directly with `createCaller`.
 - Repositories use the real Drizzle database connection.
-- Each test file generally creates one container in `beforeAll`.
-- Each test resets the database with `TRUNCATE TABLE ... RESTART IDENTITY CASCADE`.
+- Tests avoid per-test database truncation by creating fresh company-scoped fixtures.
 - External services are mocked:
   - env;
   - logging;
   - Google address validation.
 - The database and application persistence behavior remain real.
+- The performance story is a move from roughly 46s to roughly 6s by removing container-per-file overhead, isolating by worker database, and leaning on company scoping instead of global cleanup.
 
 Planned structure:
 
@@ -99,29 +101,33 @@ Planned structure:
    - logger mock;
    - address validation mock.
 4. Explain `TestContext`:
-   - start PostgreSQL with testcontainers;
+   - read shared container/template state from the temp file;
+   - derive a database name from `JEST_WORKER_ID`;
+   - create/reuse a worker database from the template;
    - set `DATABASE_URL`;
    - reset modules;
-   - run migrations;
    - create Drizzle db;
    - build tRPC caller;
    - allow auth switching with `authenticatedWith`.
 5. Explain why Graphile Worker migrations matter:
    - tests assert real job records;
    - job enqueueing uses database functions/tables.
-6. Explain reset strategy:
-   - migrate once per container;
-   - truncate before each test;
-   - avoid per-test containers.
-7. Explain company scoping and parallelism:
-   - current snapshot isolates by container per test file;
-   - inside a file, tests reset the database;
-   - if sharing containers/workers, unique companies or database/schema partitioning becomes important.
+6. Explain the optimization path:
+   - old setup created one container per test file;
+   - new setup creates one container for the Jest project;
+   - each worker gets a separate database;
+   - the template database avoids repeated migrations.
+7. Explain company scoping and cleanup:
+   - each test creates fresh companies;
+   - most endpoints filter by authenticated company;
+   - stale rows can coexist without affecting company-scoped behavior;
+   - this is powerful but application-specific.
 8. Discuss the tradeoff:
    - realistic behavior and high confidence;
    - slower than unit tests;
    - Docker required;
-   - container count can become a problem if the suite grows.
+   - more harness complexity than one container per file;
+   - global or non-company-scoped data still needs extra care.
 9. Close with practical guidelines:
    - keep unit tests for pure domain behavior;
    - use integration tests where persistence behavior is part of the risk;
@@ -130,11 +136,11 @@ Planned structure:
 
 Open point before drafting:
 
-The current snapshot appears to start one PostgreSQL container per integration test file. The final article should confirm whether this is still the current Manuscritten setup or whether a newer optimization exists for sharing containers per worker or per suite.
+Confirm the final runtime number to use in prose. The commit history records the first large improvement as 46s to 11s, while the final narrative target is 46s to 6s after all three levers.
 
 ## Suggested Drafting Order
 
 1. Draft post 1 first, using the conceptual hexagonal example and Manuscritten examples from `research.md`.
 2. Review the argument and examples with the user.
 3. Write final `post1/article.md` only after the draft is approved.
-4. Before drafting post 2, confirm the current desired explanation for container parallelism and whether to document the snapshot as-is or include a newer optimization.
+4. Before drafting post 2, confirm the exact schema and the final runtime phrasing.

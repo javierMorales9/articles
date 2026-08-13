@@ -222,11 +222,14 @@ This file is the map of the series.
 Stores the detailed structure for one article:
 
 - Headings and section order.
+- A `Section Review` note at the start of each section.
 - Paragraph-level notes.
 - Examples to include.
 - Code snippets to include.
 - Mermaid diagrams.
 - Open questions or decisions still pending.
+
+This file is both a readable proto-article and a section-by-section editorial review. Each section review should call out prose problems, underexplained concepts, missing examples or context, flow issues, and any relevant violations of `content_rules.md`.
 
 This file is the blueprint for final prose, not the final article.
 
@@ -246,6 +249,7 @@ Use `article.md` as the default final prose filename. Do not create `final.md` u
 - Keep code snippets short. Include only the lines needed to make the point.
 - Prefer Mermaid for diagrams.
 - Avoid turning `research.md` or `draft.md` into polished article prose too early.
+- In `draft.md`, start each article section with a short `Section Review` note before the draft prose.
 
 ## Code Research Guidelines
 

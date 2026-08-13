@@ -1,5 +1,6 @@
 # Snapshot repos/worktrees live under each article folder.
 # They are large and should not be committed.
+**/ref
 **/ref/
 
 # Node artifacts (in case refs are opened/installed locally)

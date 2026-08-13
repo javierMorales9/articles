@@ -38,6 +38,36 @@ A good draft is a guided proto-article:
 
 The goal of `draft.md` is not just to remember what the article covers. It should make the intended article almost readable already, while still leaving room for revision before publication.
 
+Each draft section should also act as a local editorial review. At the beginning of every section, before the draft prose for that section, add a short `Section Review` note that names the current risks or weaknesses in that section.
+
+Use the note to flag:
+
+- prose that does not yet read smoothly;
+- concepts that are introduced too quickly or need a clearer explanation;
+- missing examples, stakes, context, diagrams, or code snippets;
+- places where the argument jumps instead of moving linearly;
+- violations of these content rules that should be fixed before `article.md`.
+
+Keep the review note practical and section-specific. Do not use it as a generic checklist, and do not let it replace the draft prose. If the section is already in good shape, say that briefly and name any small remaining risk.
+
+Recommended section shape:
+
+````text
+## Why The API Was Riskier Than It Looked
+
+### Section Review
+
+- The section has the right premise, but it still needs a concrete customer workflow before introducing the endpoint.
+- The risk is currently abstract. Add one example where duplicate letters would create a real operational problem.
+
+### Draft
+
+The API looked simple from the outside: send us the recipient data, tell us which template
+to use, and we would create the handwritten letters for you.
+
+But that simplicity hid the part that mattered most...
+````
+
 Bad draft shape:
 
 ```text
@@ -213,6 +243,55 @@ The first global iteration uses index 0 and picks Ana. The second uses index 1 a
 ```
 
 Rule of thumb: when the article explains a technical tool or pattern, show one tiny input and one tiny output.
+
+## Show File Layout Before Multiple Files
+
+When a section introduces several files, show a small filesystem tree before the code snippets.
+
+This helps the reader understand where each file belongs before they have to parse imports, config paths, setup files, tests, and production code at the same time.
+
+Include the files that matter for the section:
+
+- production code;
+- test files;
+- config files;
+- setup/teardown files;
+- helper modules used by the snippets.
+
+Bad shape:
+
+```text
+First, create `jest.config.ts`.
+
+Then add `src/tests/utils/serverIntGlobalSetup.ts`.
+
+Then the test lives in `src/tests/integration/todos.test.ts`.
+```
+
+Why it fails:
+
+- the reader has to build the project structure mentally;
+- config paths are harder to verify;
+- snippets feel disconnected from each other.
+
+Better shape:
+
+```text
+todo-app/
+  package.json
+  jest.config.ts
+  src/
+    todos/
+      createTodo.ts
+    tests/
+      integration/
+        todos.test.ts
+      utils/
+        serverIntGlobalSetup.ts
+        serverIntGlobalTeardown.ts
+```
+
+Then introduce each file in that order.
 
 ## Make Contrasts Visible
 

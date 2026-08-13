@@ -89,7 +89,7 @@ When starting or resuming work on a series:
 ## Workflow Boundaries
 - `research.md` contains facts from the codebase, commit range, domain model, tests, and implementation decisions.
 - `series.md` contains the agreed series structure and the purpose of each article.
-- `draft.md` contains the detailed article outline, examples, diagrams, code snippets, and section-level notes.
+- `draft.md` contains the detailed article outline, examples, diagrams, code snippets, section-level notes, and a `Section Review` note at the start of each section.
 - `article.md` contains the publishable final article.
 - `header_image.png` contains the post header image, created after `article.md` using `header_image.md`.
 - Do not jump from research directly to final prose unless the user explicitly asks for that.
@@ -103,4 +103,5 @@ When starting or resuming work on a series:
 - When explaining concurrency, use a step-by-step interleaving ("dance") with a concrete example and include both pseudocode and equivalent SQL.
 - Keep code snippets minimal and explanatory. Prefer short excerpts that support the point over complete functions.
 - When a schema asks for an example, diagram, or code snippet, fill in the missing concrete detail in `draft.md`.
+- In `draft.md`, start every section with a concise `Section Review` that flags weak prose, underexplained concepts, missing examples or context, flow issues, and violations of `content_rules.md`.
 - Mermaid is the preferred format for diagrams unless the user asks for another format.
